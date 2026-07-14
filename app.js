@@ -35,7 +35,7 @@ const FIRMA_PABLO_B64 = null;
 // Es seguro que esta clave quede visible en el código: el acceso real lo controlan
 // las funciones RPC con seguridad a nivel de fila definidas en supabase_schema.sql.
 const SUPABASE_URL      = 'https://oeqjqfjdswwyyjbgdaxk.supabase.co';
-const SUPABASE_ANON_KEY = 'PENDIENTE_PEGAR_TU_ANON_KEY';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9lcWpxZmpkc3d3eXlqYmdkYXhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwNTE5ODYsImV4cCI6MjA5OTYyNzk4Nn0.lgD8nfhPSmgNGPwio_fJZhlcnLTOxBemTjx_LKLST7g';
 const supa = (typeof supabase !== 'undefined' && /^eyJ/.test(SUPABASE_ANON_KEY))
     ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
@@ -934,8 +934,26 @@ async function generarLinkFirmaOT(presId, id) {
     ot.remota = true;
     guardarDB();
     const link = `${location.origin}${location.pathname}?firmar=${ot.id}`;
-    prompt('Copia este link y envíaselo al cliente (WhatsApp, email, etc.):', link);
+    mostrarLinkFirma(link);
     toast('Link generado', 'success');
+}
+
+function mostrarLinkFirma(link) {
+    document.getElementById('link-firma-input').value = link;
+    document.getElementById('link-firma-abrir').href = link;
+    abrirModal('modal-link-firma');
+}
+
+async function copiarLinkFirma() {
+    const input = document.getElementById('link-firma-input');
+    try {
+        await navigator.clipboard.writeText(input.value);
+        toast('Link copiado', 'success');
+    } catch {
+        input.select();
+        document.execCommand('copy');
+        toast('Link copiado', 'success');
+    }
 }
 
 async function sincronizarFirmasRemotas() {
@@ -1073,6 +1091,7 @@ function confirmarFirmaOT() {
 // solo consulta/actualiza la OT puntual en Supabase mediante las funciones RPC.
 // ════════════════════════════════════════════════════════
 async function iniciarVistaFirmaRemota(id) {
+    document.getElementById('app-shell').classList.add('hidden');
     document.getElementById('vista-firma-remota').classList.remove('hidden');
     rfOtId = id;
     initFirmaRF();
@@ -1789,7 +1808,7 @@ function cerrarModal(id) {
     document.body.style.overflow='';
 }
 document.addEventListener('click', e=>{
-    ['modal-contrato','modal-comprobante','modal-catalogo','modal-ot'].forEach(id=>{
+    ['modal-contrato','modal-comprobante','modal-catalogo','modal-ot','modal-link-firma'].forEach(id=>{
         const el=document.getElementById(id);
         if(el && e.target===el) {
             cerrarModal(id);

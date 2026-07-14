@@ -54,6 +54,8 @@
 </head>
 <body class="bg-slate-100 min-h-screen antialiased">
 
+<div id="app-shell">
+
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header class="bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-xl">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -475,6 +477,8 @@
     </section>
 </main>
 
+</div>
+
 <!-- ═══ MODAL · CONTRATO (FIRMA + CÁMARA) ═══ -->
 <div id="modal-contrato" role="dialog" style="display:none" class="modal-overlay fixed inset-0 bg-black/60 z-50 items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -646,6 +650,28 @@
                 </thead>
                 <tbody id="cat-tbody"></tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ MODAL · LINK DE FIRMA ═══ -->
+<div id="modal-link-firma" role="dialog" style="display:none" class="modal-overlay fixed inset-0 bg-black/60 z-50 items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between px-6 py-4 border-b">
+            <h3 class="text-lg font-bold text-slate-800">🔗 Link de firma generado</h3>
+            <button onclick="cerrarModal('modal-link-firma')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="p-6 space-y-3">
+            <p class="text-sm text-slate-500">Envía este link al cliente por WhatsApp, email, etc.</p>
+            <input id="link-firma-input" type="text" readonly onclick="this.select()"
+                class="campo-input w-full text-sm" />
+            <div class="grid grid-cols-2 gap-3 pt-1">
+                <button onclick="copiarLinkFirma()" class="btn-secondary py-2">📋 Copiar</button>
+                <a id="link-firma-abrir" href="#" target="_blank" rel="noopener"
+                    class="text-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-xl transition-colors">Abrir link</a>
+            </div>
         </div>
     </div>
 </div>
