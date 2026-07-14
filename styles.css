@@ -1,0 +1,173 @@
+/* ═══════════════════════════════════════════
+   styles.css — Presupuestos PHH
+   Estilos complementarios a Tailwind CDN
+   ═══════════════════════════════════════════ */
+
+/* ── Reset suave ────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+/* ── Fuente del sistema ─────────────────────── */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ── Animación de entrada en pestañas ────────── */
+.tab-content:not(.hidden) {
+    animation: fadeSlideIn 0.15s ease-out both;
+}
+@keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* ── Scrollbar personalizada ─────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: #f1f5f9; }
+::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Input type=number sin flechas ───────────── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; }
+
+/* ── Range slider (barras de avance EDP) ─────── */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: #e2e8f0;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.2s;
+}
+input[type="range"]:hover { background: #cbd5e1; }
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    background: #10b981;
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    transition: transform 0.15s, background 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    background: #059669;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    background: #10b981;
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+
+/* ── Select personalizado (flecha) ───────────── */
+select.campo-input,
+select.estado-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.45rem center;
+    background-repeat: no-repeat;
+    background-size: 1.2em;
+    padding-right: 2rem;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+
+/* ── Filas alternas en tabla ítems ───────────── */
+#items-tbody tr:nth-child(even) { background-color: #f8fafc; }
+
+/* ── Canvas firma ────────────────────────────── */
+#firma-canvas {
+    cursor: crosshair;
+    -ms-touch-action: none;
+    touch-action: none;
+    display: block;
+}
+
+/* ── Video cámara aspect ratio ───────────────── */
+#camara-video {
+    aspect-ratio: 4/3;
+    object-fit: cover;
+}
+
+/* ── Zona de carga drag-and-drop ─────────────── */
+#upload-zona {
+    transition: border-color 0.2s, background-color 0.2s;
+}
+#upload-zona.drag-over {
+    border-color: #10b981;
+    background-color: #ecfdf5;
+}
+
+/* ── Botón primario extra-estado ─────────────── */
+.btn-primary:disabled,
+.btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* ── Badge pulso en tabs ─────────────────────── */
+#badge-enviados,
+#badge-adjudicados {
+    animation: pulse-badge 2s ease-in-out infinite;
+}
+@keyframes pulse-badge {
+    0%, 100% { transform: scale(1); }
+    50%       { transform: scale(1.15); }
+}
+
+/* ── Tarjeta KPI hover lift ───────────────────── */
+.kpi-card { transition: transform 0.15s, box-shadow 0.15s; }
+.kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* ── Sombra modal ────────────────────────────── */
+#modal-factura > div {
+    box-shadow: 0 25px 60px rgba(0,0,0,0.25);
+}
+
+/* ── Toast ───────────────────────────────────── */
+#toast { transition: opacity 0.3s ease, transform 0.3s ease; }
+
+/* ── Tabla responsiva: celdas compactas en móvil */
+@media (max-width: 639px) {
+    #tabla-items th,
+    #tabla-items td { padding-left: 0.5rem; padding-right: 0.5rem; }
+    #tabla-items th:first-child,
+    #tabla-items td:first-child { padding-left: 0.75rem; }
+}
+
+/* ── Flash de fila agregada desde catálogo ──── */
+@keyframes rowFlash {
+    0%   { background-color: #e0f2fe; }
+    100% { background-color: transparent; }
+}
+.catalogo-nuevo { animation: rowFlash 1.2s ease-out both; }
+
+/* ── Impresión ───────────────────────────────── */
+@media print {
+    header, nav, .tab-btn, button, #toast { display: none !important; }
+    .tab-content { display: block !important; }
+    .bg-white { box-shadow: none !important; }
+    body { background: white; }
+}
