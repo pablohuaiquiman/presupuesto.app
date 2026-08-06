@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Presupuestos PHH</title>
+    <title>Presupuestos App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -54,7 +54,93 @@
 </head>
 <body class="bg-slate-100 min-h-screen antialiased">
 
-<div id="app-shell">
+<!-- ═══════════════ LOGIN / REGISTRO ═══════════════ -->
+<div id="login-gate" class="hidden min-h-screen flex items-center justify-center px-4 py-10">
+    <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-11 h-11 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
+                <span class="text-white font-black text-xl">P</span>
+            </div>
+            <div>
+                <h1 class="text-lg font-black tracking-wide text-slate-800">Presupuestos App</h1>
+                <p class="text-slate-400 text-xs">Cotizaciones, órdenes de trabajo y firma digital</p>
+            </div>
+        </div>
+
+        <!-- Iniciar sesión -->
+        <div id="bloque-login">
+            <h2 class="text-sm font-bold text-slate-700 mb-4">Iniciar sesión</h2>
+            <form id="login-form" class="space-y-3">
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Correo</label>
+                    <input type="email" id="login-email" required class="campo-input w-full" autocomplete="username">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Contraseña</label>
+                    <input type="password" id="login-password" required class="campo-input w-full" autocomplete="current-password">
+                </div>
+                <p id="login-error" class="text-xs text-red-600 hidden"></p>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 rounded-lg transition-colors">Ingresar</button>
+            </form>
+            <button onclick="mostrarBloque('signup')" class="w-full text-xs text-slate-500 hover:text-blue-700 font-semibold mt-4">¿Empresa nueva? Crear cuenta</button>
+        </div>
+
+        <!-- Crear cuenta -->
+        <div id="bloque-signup" class="hidden">
+            <h2 class="text-sm font-bold text-slate-700 mb-4">Crear cuenta de empresa</h2>
+            <form id="signup-form" class="space-y-3">
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Nombre de tu empresa</label>
+                    <input id="signup-empresa" required class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Tu nombre</label>
+                    <input id="signup-nombre" required class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Correo</label>
+                    <input type="email" id="signup-email" required class="campo-input w-full" autocomplete="username">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Contraseña</label>
+                    <input type="password" id="signup-password" required minlength="6" class="campo-input w-full" autocomplete="new-password">
+                </div>
+                <p id="signup-error" class="text-xs text-red-600 hidden"></p>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg transition-colors">Crear cuenta</button>
+            </form>
+            <button onclick="mostrarBloque('login')" class="w-full text-xs text-slate-500 hover:text-blue-700 font-semibold mt-4">Ya tengo cuenta, iniciar sesión</button>
+        </div>
+
+        <!-- Completar registro (caso borde: sesión sin empresa asociada) -->
+        <div id="bloque-onboarding" class="hidden">
+            <h2 class="text-sm font-bold text-slate-700 mb-4">Completa el registro de tu empresa</h2>
+            <form id="onboarding-form" class="space-y-3">
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Nombre de tu empresa</label>
+                    <input id="onb-empresa" required class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Tu nombre</label>
+                    <input id="onb-nombre" required class="campo-input w-full">
+                </div>
+                <p id="onboarding-error" class="text-xs text-red-600 hidden"></p>
+                <button type="submit" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 rounded-lg transition-colors">Continuar</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════ PENDIENTE DE APROBACIÓN ═══════════════ -->
+<div id="pending-gate" class="hidden min-h-screen flex items-center justify-center px-4">
+    <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm text-center">
+        <div class="w-14 h-14 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">⏳</div>
+        <h2 class="text-base font-bold text-slate-800 mb-2">Cuenta pendiente de aprobación</h2>
+        <p class="text-sm text-slate-500 mb-6">Tu empresa <strong id="pending-empresa-nombre"></strong> quedó registrada. Te avisaremos cuando puedas empezar a usar el sistema.</p>
+        <button onclick="cerrarSesion()" class="text-xs text-slate-400 hover:text-red-500 font-semibold">Cerrar sesión</button>
+    </div>
+</div>
+
+<div id="app-shell" class="hidden">
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header class="bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-xl">
@@ -64,11 +150,14 @@
                 <span class="text-white font-black text-xl">P</span>
             </div>
             <div>
-                <h1 class="text-lg font-black tracking-wide">Presupuestos PHH</h1>
-                <p class="text-slate-400 text-xs">Constructora e Instalaciones PHH SpA</p>
+                <h1 id="header-empresa-nombre" class="text-lg font-black tracking-wide">Presupuestos App</h1>
+                <p class="text-slate-400 text-xs">Cotizaciones, órdenes de trabajo y firma digital</p>
             </div>
         </div>
-        <div id="header-fecha" class="text-right text-xs text-slate-400 hidden sm:block"></div>
+        <div class="flex items-center gap-4">
+            <div id="header-fecha" class="text-right text-xs text-slate-400 hidden sm:block"></div>
+            <button onclick="cerrarSesion()" class="text-xs text-slate-300 hover:text-white border border-slate-600 hover:border-slate-400 rounded-lg px-3 py-1.5 transition-colors">Cerrar sesión</button>
+        </div>
     </div>
 </header>
 
@@ -147,6 +236,31 @@
                     <span class="hidden sm:inline">Órdenes de Trabajo</span>
                     <span class="sm:hidden">O. Trabajo</span>
                     <span id="badge-ot" class="hidden bg-indigo-400 text-indigo-900 text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">0</span>
+                </span>
+            </button>
+
+            <!-- 6 · Mi Empresa -->
+            <button data-tab="tab-empresa" onclick="mostrarTab('tab-empresa')"
+                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                       py-3 px-2 text-center border-b-2 transition-all
+                       border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9v.01M9 12v.01M9 15v.01"/>
+                </svg>
+                <span class="text-xs sm:text-sm font-semibold leading-tight">Mi Empresa</span>
+            </button>
+
+            <!-- 7 · Empresas (solo superadmin) -->
+            <button id="nav-superadmin" data-tab="tab-superadmin" onclick="mostrarTab('tab-superadmin')"
+                class="hidden tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                       py-3 px-2 text-center border-b-2 transition-all
+                       border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-4a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-4-4"/>
+                </svg>
+                <span class="text-xs sm:text-sm font-semibold leading-tight flex items-center gap-1">
+                    Empresas
+                    <span id="badge-superadmin" class="hidden bg-red-400 text-red-900 text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">0</span>
                 </span>
             </button>
 
@@ -475,6 +589,96 @@
             </div>
         </div>
     </section>
+
+    <!-- ══ TAB 6 · MI EMPRESA ══ -->
+    <section id="tab-empresa" class="tab-content hidden space-y-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-slate-800 to-slate-600 px-6 py-4">
+                <h2 class="text-white text-lg font-bold">Datos de tu empresa</h2>
+                <p class="text-slate-300 text-xs mt-0.5">Aparecen en tus presupuestos, órdenes de trabajo y PDF</p>
+            </div>
+            <form id="form-empresa" class="p-6 grid sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="text-xs font-semibold text-slate-500">Nombre comercial</label>
+                    <input id="emp-nombre-comercial" required class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Razón social</label>
+                    <input id="emp-razon-social" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">RUT</label>
+                    <input id="emp-rut" class="campo-input w-full">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="text-xs font-semibold text-slate-500">Dirección</label>
+                    <input id="emp-direccion" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Teléfono</label>
+                    <input id="emp-telefono" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Correo de contacto</label>
+                    <input id="emp-email" type="email" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Nombre del responsable</label>
+                    <input id="emp-responsable-nombre" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Cargo del responsable</label>
+                    <input id="emp-responsable-cargo" class="campo-input w-full">
+                </div>
+                <div class="sm:col-span-2">
+                    <button type="submit" class="bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 px-6 rounded-lg transition-colors">Guardar datos</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-slate-800 to-slate-600 px-6 py-4">
+                <h2 class="text-white text-lg font-bold">Mi equipo</h2>
+                <p class="text-slate-300 text-xs mt-0.5" id="equipo-cupos">—</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <div id="equipo-lista" class="divide-y divide-slate-100"></div>
+                <form id="form-invitar" class="hidden flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-100">
+                    <input id="inv-nombre" placeholder="Nombre" class="campo-input flex-1">
+                    <input id="inv-email" type="email" required placeholder="correo@ejemplo.com" class="campo-input flex-1">
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg transition-colors whitespace-nowrap">Invitar</button>
+                </form>
+                <p id="invitar-msg" class="text-xs hidden"></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ══ TAB 7 · EMPRESAS (superadmin) ══ -->
+    <section id="tab-superadmin" class="tab-content hidden">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-red-800 to-red-600 px-6 py-4">
+                <h2 class="text-white text-lg font-bold">Empresas registradas</h2>
+                <p class="text-red-200 text-xs mt-0.5">Aprueba cuentas nuevas y ajusta cupos de usuarios</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Empresa</th>
+                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Estado</th>
+                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Usuarios</th>
+                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Cupo</th>
+                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="superadmin-tbody"></tbody>
+                </table>
+            </div>
+            <div id="superadmin-vacio" class="hidden p-14 text-center text-slate-400">
+                <p class="font-semibold">Sin empresas registradas todavía</p>
+            </div>
+        </div>
+    </section>
 </main>
 
 </div>
@@ -696,7 +900,7 @@
     </div>
     <div id="rf-contenido" class="hidden space-y-5">
         <div class="bg-slate-900 rounded-2xl px-6 py-5">
-            <p class="text-white font-black text-lg uppercase tracking-wide">Constructora e Instalaciones PHH SpA</p>
+            <p class="text-white font-black text-lg uppercase tracking-wide" id="rf-empresa-nombre">—</p>
             <p class="text-amber-400 text-xs font-bold uppercase tracking-widest mt-1">Orden de Trabajo — Firma Digital</p>
         </div>
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">

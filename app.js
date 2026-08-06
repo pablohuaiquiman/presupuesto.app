@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// app.js — Presupuestos PHH  (arquitectura Itemizar)
+// app.js — Presupuestos App  (arquitectura Itemizar, multiempresa)
 // Capítulos → Partidas → EDP por avance físico
 // ═══════════════════════════════════════════════════════════
 
@@ -26,9 +26,6 @@ let otPresId = null, otId = null;
 let streamOT = null;
 let ocCanvas, ocCtx, ocDibujando = false, ocUltimoPunto = null;
 
-// Firma de Pablo Huaiquiman para encabezar/pie de los PDF (empresa).
-// Reemplazar por la data URI real (data:image/png;base64,...) cuando se entregue el archivo.
-const FIRMA_PABLO_B64 = null;
 
 // ── Firma remota (Supabase) ──────────────────────────────
 // anon/public key en Settings → API de tu proyecto Supabase (NO la service_role).
@@ -42,11 +39,125 @@ const supa = (typeof supabase !== 'undefined' && /^eyJ/.test(SUPABASE_ANON_KEY))
 let rfCanvas, rfCtx, rfDibujando = false, rfUltimoPunto = null;
 let streamRF = null, rfOtId = null, rfOtCache = null;
 
+// ── Autenticación / multiempresa ──────────────────────────
+let currentUserId = null;
+let empresaActual  = null;   // fila de la tabla `empresas`
+let miPerfil       = null;   // fila de la tabla `perfiles`
+
 // ── Arranque ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     const idFirmaRemota = new URLSearchParams(location.search).get('firmar');
     if (idFirmaRemota) { iniciarVistaFirmaRemota(idFirmaRemota); return; }
-    cargarDB();
+    document.getElementById('login-form').addEventListener('submit', onSubmitLogin);
+    document.getElementById('signup-form').addEventListener('submit', onSubmitSignup);
+    document.getElementById('onboarding-form').addEventListener('submit', onSubmitOnboarding);
+    document.getElementById('form-empresa').addEventListener('submit', onSubmitEmpresa);
+    document.getElementById('form-invitar').addEventListener('submit', onSubmitInvitar);
+    iniciarApp();
+});
+
+async function iniciarApp() {
+    if (!supa) { await arrancarAppPrincipal(); return; }
+    const { data: { session } } = await supa.auth.getSession();
+    if (!session) { mostrarLogin(); return; }
+    currentUserId = session.user.id;
+    await resolverSesion();
+}
+
+// Muestra una sola de las 3 pantallas raíz: login/registro, pendiente de
+// aprobación, o la app completa.
+function mostrarSoloGate(id) {
+    ['login-gate', 'pending-gate', 'app-shell'].forEach(g => {
+        document.getElementById(g).classList.toggle('hidden', g !== id);
+    });
+}
+
+function mostrarBloque(which) {
+    ['login', 'signup', 'onboarding'].forEach(b => {
+        document.getElementById('bloque-' + b).classList.toggle('hidden', b !== which);
+    });
+}
+
+function mostrarLogin() {
+    mostrarBloque('login');
+    mostrarSoloGate('login-gate');
+}
+
+// Se llama después de cualquier inicio de sesión exitoso (login, registro
+// con sesión inmediata, o vuelta desde confirmación de correo). Decide qué
+// pantalla mostrar según si el usuario tiene empresa y si está aprobada.
+async function resolverSesion() {
+    const { data: perfil, error: perfilErr } = await supa.from('perfiles').select('*').eq('id', currentUserId).maybeSingle();
+    if (perfilErr) { toast('Error cargando tu perfil: ' + perfilErr.message, 'error'); return; }
+    if (!perfil) { mostrarBloque('onboarding'); mostrarSoloGate('login-gate'); return; }
+    miPerfil = perfil;
+
+    const { data: empresa, error: empresaErr } = await supa.from('empresas').select('*').eq('id', perfil.empresa_id).maybeSingle();
+    if (empresaErr || !empresa) { toast('No se pudo cargar tu empresa', 'error'); return; }
+    empresaActual = empresa;
+
+    if (!empresa.aprobada && !perfil.es_superadmin) {
+        document.getElementById('pending-empresa-nombre').textContent = empresa.nombre_comercial;
+        mostrarSoloGate('pending-gate');
+        return;
+    }
+    await arrancarAppPrincipal();
+}
+
+async function onSubmitLogin(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+    errorEl.classList.add('hidden');
+    const { data, error } = await supa.auth.signInWithPassword({ email, password });
+    if (error) { errorEl.textContent = 'Correo o contraseña incorrectos.'; errorEl.classList.remove('hidden'); return; }
+    currentUserId = data.user.id;
+    await resolverSesion();
+}
+
+async function onSubmitSignup(e) {
+    e.preventDefault();
+    const nombreEmpresa = document.getElementById('signup-empresa').value.trim();
+    const nombreUsuario = document.getElementById('signup-nombre').value.trim();
+    const email = document.getElementById('signup-email').value.trim();
+    const password = document.getElementById('signup-password').value;
+    const errorEl = document.getElementById('signup-error');
+    errorEl.className = 'text-xs text-red-600 hidden';
+
+    const { data, error } = await supa.auth.signUp({ email, password });
+    if (error) { errorEl.textContent = error.message; errorEl.classList.remove('hidden'); return; }
+
+    if (!data.session) {
+        errorEl.className = 'text-xs text-emerald-600';
+        errorEl.textContent = 'Cuenta creada. Revisa tu correo para confirmarla y luego inicia sesión.';
+        errorEl.classList.remove('hidden');
+        return;
+    }
+    currentUserId = data.user.id;
+    const { error: rpcErr } = await supa.rpc('crear_empresa_y_admin', { p_nombre_comercial: nombreEmpresa, p_nombre_usuario: nombreUsuario });
+    if (rpcErr) { errorEl.textContent = rpcErr.message; errorEl.classList.remove('hidden'); return; }
+    await resolverSesion();
+}
+
+async function onSubmitOnboarding(e) {
+    e.preventDefault();
+    const nombreEmpresa = document.getElementById('onb-empresa').value.trim();
+    const nombreUsuario = document.getElementById('onb-nombre').value.trim();
+    const errorEl = document.getElementById('onboarding-error');
+    errorEl.classList.add('hidden');
+    const { error } = await supa.rpc('crear_empresa_y_admin', { p_nombre_comercial: nombreEmpresa, p_nombre_usuario: nombreUsuario });
+    if (error) { errorEl.textContent = error.message; errorEl.classList.remove('hidden'); return; }
+    await resolverSesion();
+}
+
+async function cerrarSesion() {
+    if (supa) await supa.auth.signOut();
+    location.reload();
+}
+
+async function arrancarAppPrincipal() {
+    await cargarDB();
     initFecha();
     initRegiones();
     initFirmaContrato();
@@ -55,21 +166,191 @@ document.addEventListener('DOMContentLoaded', () => {
     agregarCapitulo();        // empieza con un capítulo vacío
     actualizarBadges();
     actualizarNumeroFormulario();
-});
+    aplicarBranding();
+    cargarFormularioEmpresa();
+    cargarEquipo();
+    if (miPerfil?.es_superadmin) {
+        document.getElementById('nav-superadmin').classList.remove('hidden');
+        cargarSuperadmin();
+    }
+    mostrarSoloGate('app-shell');
+}
 
 // ════════════════════════════════════════════════════════
 // PERSISTENCIA
 // ════════════════════════════════════════════════════════
-function cargarDB() {
-    try { presupuestos = JSON.parse(localStorage.getItem(DB_KEY)) || []; }
-    catch { presupuestos = []; }
+async function cargarDB() {
+    if (supa && empresaActual) {
+        const { data, error } = await supa.from('presupuestos').select('data').eq('empresa_id', empresaActual.id);
+        presupuestos = error ? [] : (data || []).map(row => row.data);
+        if (error) toast('No se pudo cargar desde Supabase: ' + error.message, 'error');
+    } else {
+        try { presupuestos = JSON.parse(localStorage.getItem(DB_KEY)) || []; }
+        catch { presupuestos = []; }
+    }
     presupuestos.forEach(p => {
         if (!p.ordenesTrabajo) p.ordenesTrabajo = [];
         if (typeof p.usarGGUtil !== 'boolean') p.usarGGUtil = true;
     });
 }
 function guardarDB() {
+    if (supa && empresaActual) {
+        const rows = presupuestos.map(p => ({ id: p.id, empresa_id: empresaActual.id, data: p, updated_at: new Date().toISOString() }));
+        if (rows.length) {
+            supa.from('presupuestos').upsert(rows).then(({ error }) => {
+                if (error) toast('No se pudo guardar en Supabase: ' + error.message, 'error');
+            });
+        }
+        return;
+    }
     localStorage.setItem(DB_KEY, JSON.stringify(presupuestos));
+}
+
+// ════════════════════════════════════════════════════════
+// MI EMPRESA — branding, equipo, invitaciones
+// ════════════════════════════════════════════════════════
+function aplicarBranding() {
+    const nombre = empresaActual?.nombre_comercial || 'Presupuestos App';
+    document.getElementById('header-empresa-nombre').textContent = nombre;
+    document.title = nombre;
+}
+
+function empresaInfoLineaHtml() {
+    const e = empresaActual || {};
+    const l1 = [e.direccion, e.rut ? ('RUT: ' + e.rut) : null].filter(Boolean).map(esc).join(' &nbsp;·&nbsp; ');
+    const l2 = [e.email_contacto, e.telefono].filter(Boolean).map(esc).join(' &nbsp;·&nbsp; ');
+    return [l1, l2].filter(Boolean).join('<br>');
+}
+
+function cargarFormularioEmpresa() {
+    const e = empresaActual || {};
+    document.getElementById('emp-nombre-comercial').value = e.nombre_comercial || '';
+    document.getElementById('emp-razon-social').value = e.razon_social || '';
+    document.getElementById('emp-rut').value = e.rut || '';
+    document.getElementById('emp-direccion').value = e.direccion || '';
+    document.getElementById('emp-telefono').value = e.telefono || '';
+    document.getElementById('emp-email').value = e.email_contacto || '';
+    document.getElementById('emp-responsable-nombre').value = e.responsable_nombre || '';
+    document.getElementById('emp-responsable-cargo').value = e.responsable_cargo || '';
+}
+
+async function onSubmitEmpresa(e) {
+    e.preventDefault();
+    const datos = {
+        nombre_comercial: document.getElementById('emp-nombre-comercial').value.trim(),
+        razon_social: document.getElementById('emp-razon-social').value.trim(),
+        rut: document.getElementById('emp-rut').value.trim(),
+        direccion: document.getElementById('emp-direccion').value.trim(),
+        telefono: document.getElementById('emp-telefono').value.trim(),
+        email_contacto: document.getElementById('emp-email').value.trim(),
+        responsable_nombre: document.getElementById('emp-responsable-nombre').value.trim(),
+        responsable_cargo: document.getElementById('emp-responsable-cargo').value.trim(),
+    };
+    const { error } = await supa.from('empresas').update(datos).eq('id', empresaActual.id);
+    if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+    Object.assign(empresaActual, datos);
+    aplicarBranding();
+    toast('Datos de la empresa guardados', 'success');
+}
+
+async function cargarEquipo() {
+    const { data, error } = await supa.from('perfiles').select('*').eq('empresa_id', empresaActual.id).order('creado_en');
+    const lista = document.getElementById('equipo-lista');
+    if (error) { lista.innerHTML = `<p class="text-xs text-red-500">${esc(error.message)}</p>`; return; }
+    document.getElementById('equipo-cupos').textContent = `${data.length} de ${empresaActual.limite_usuarios} cupo(s) usados`;
+    lista.innerHTML = data.map(m => `
+        <div class="py-2.5 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-semibold text-slate-700">${esc(m.nombre || '(sin nombre)')}</p>
+                <p class="text-xs text-slate-400">${m.rol === 'admin' ? 'Administrador' : 'Miembro'}</p>
+            </div>
+        </div>`).join('');
+    document.getElementById('form-invitar').classList.toggle('hidden', miPerfil?.rol !== 'admin');
+}
+
+async function onSubmitInvitar(e) {
+    e.preventDefault();
+    const email = document.getElementById('inv-email').value.trim();
+    const nombre = document.getElementById('inv-nombre').value.trim();
+    const msgEl = document.getElementById('invitar-msg');
+    msgEl.classList.add('hidden');
+
+    const { data: { session } } = await supa.auth.getSession();
+    const { data, error } = await supa.functions.invoke('invitar-usuario', {
+        body: { email, nombre },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    msgEl.classList.remove('hidden');
+    if (error || data?.error) {
+        msgEl.className = 'text-xs text-red-600';
+        msgEl.textContent = data?.error || error.message;
+        return;
+    }
+    msgEl.className = 'text-xs text-emerald-600';
+    msgEl.textContent = `Invitación enviada a ${email}.`;
+    document.getElementById('inv-email').value = '';
+    document.getElementById('inv-nombre').value = '';
+    cargarEquipo();
+}
+
+// ════════════════════════════════════════════════════════
+// EMPRESAS (panel superadmin)
+// ════════════════════════════════════════════════════════
+async function cargarSuperadmin() {
+    const tbody = document.getElementById('superadmin-tbody');
+    const vacio = document.getElementById('superadmin-vacio');
+    const { data, error } = await supa.from('empresas').select('*, perfiles(count)').order('creado_en', { ascending: false });
+    if (error) { tbody.innerHTML = ''; vacio.classList.remove('hidden'); vacio.querySelector('p').textContent = error.message; return; }
+    if (!data.length) { tbody.innerHTML = ''; vacio.classList.remove('hidden'); return; }
+    vacio.classList.add('hidden');
+
+    tbody.innerHTML = data.map(e => {
+        const usados = e.perfiles?.[0]?.count ?? 0;
+        return `
+        <tr class="border-t border-slate-100">
+            <td class="px-4 py-3">
+                <p class="font-semibold text-slate-800 text-sm">${esc(e.nombre_comercial)}</p>
+                <p class="text-xs text-slate-400">${esc(e.rut || '')}</p>
+            </td>
+            <td class="px-4 py-3 text-center">
+                ${e.aprobada
+                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold">Aprobada</span>`
+                    : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">Pendiente</span>`}
+            </td>
+            <td class="px-4 py-3 text-center text-sm">${usados}</td>
+            <td class="px-4 py-3 text-center">
+                <input type="number" min="1" value="${e.limite_usuarios}" id="cupo-${e.id}" class="campo-input w-16 text-center">
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex justify-center gap-1.5 flex-wrap">
+                    <button onclick="guardarCupo('${e.id}')" class="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-bold transition-colors">Guardar cupo</button>
+                    ${e.aprobada
+                        ? `<button onclick="cambiarAprobacion('${e.id}', false)" class="text-xs px-3 py-1.5 border border-red-300 text-red-500 hover:bg-red-50 rounded-lg font-medium transition-colors">Suspender</button>`
+                        : `<button onclick="cambiarAprobacion('${e.id}', true)" class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">Aprobar</button>`}
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+
+    const pendientes = data.filter(e => !e.aprobada).length;
+    document.getElementById('badge-superadmin').textContent = pendientes;
+    document.getElementById('badge-superadmin').classList.toggle('hidden', pendientes === 0);
+}
+
+async function cambiarAprobacion(empresaId, aprobada) {
+    const { error } = await supa.rpc('aprobar_empresa', { p_empresa_id: empresaId, p_aprobada: aprobada });
+    if (error) return toast('Error: ' + error.message, 'error');
+    toast(aprobada ? 'Empresa aprobada' : 'Empresa suspendida', 'success');
+    cargarSuperadmin();
+}
+
+async function guardarCupo(empresaId) {
+    const val = parseInt(document.getElementById(`cupo-${empresaId}`).value) || 1;
+    const { error } = await supa.rpc('set_limite_usuarios', { p_empresa_id: empresaId, p_limite: val });
+    if (error) return toast('Error: ' + error.message, 'error');
+    toast('Cupo actualizado', 'success');
+    cargarSuperadmin();
 }
 
 // ════════════════════════════════════════════════════════
@@ -155,6 +436,8 @@ function mostrarTab(tabId) {
     if (tabId === 'tab-adjudicados') renderAdjudicados();
     if (tabId === 'tab-ot')          renderOrdenesTrabajo();
     if (tabId === 'tab-firma')       renderSelectFirma();
+    if (tabId === 'tab-empresa')     cargarEquipo();
+    if (tabId === 'tab-superadmin')  cargarSuperadmin();
 }
 
 function actualizarBadges() {
@@ -922,6 +1205,7 @@ async function generarLinkFirmaOT(presId, id) {
     toast('Publicando…', 'info');
     const { error } = await supa.rpc('publicar_ot', {
         p_id: ot.id, p_numero: ot.numero, p_presupuesto_numero: p.numero,
+        p_empresa_nombre: empresaActual?.nombre_comercial || null,
         p_cliente_nombre: p.cliente.nombre, p_cliente_direccion: p.cliente.direccion,
         p_cliente_comuna: p.cliente.comuna, p_cliente_region: p.cliente.region,
         p_condicion: p.condicion, p_capitulos: p.capitulos,
@@ -1119,6 +1403,7 @@ function renderDocumentoRF(ot) {
     document.getElementById('rf-cargando').classList.add('hidden');
     document.getElementById('rf-contenido').classList.remove('hidden');
 
+    document.getElementById('rf-empresa-nombre').textContent = ot.empresa_nombre || 'Orden de Trabajo';
     document.getElementById('rf-numero').textContent      = `${ot.numero} — ${ot.presupuesto_numero}`;
     document.getElementById('rf-cliente').textContent     = ot.cliente_nombre;
     document.getElementById('rf-presupuesto').textContent = ot.presupuesto_numero;
@@ -1989,9 +2274,9 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="stripe-top"></div>
 <div class="hdr">
   <div>
-    <div class="co-name">Constructora e Instalaciones PHH SpA</div>
-    <div class="co-tag">Ingeniería y Construcción</div>
-    <div class="co-info">Chimborazo #1037 Dpto. 22 — Santiago &nbsp;·&nbsp; RUT: 77.234.145-8<br>contacto@phhspa.com &nbsp;·&nbsp; +56 9 3918 0369</div>
+    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
+    <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
+    <div class="co-info">${empresaInfoLineaHtml()}</div>
   </div>
   <div class="ppto-ref">
     <div class="ppto-lbl">N° Presupuesto</div>
@@ -2035,11 +2320,11 @@ tbody td{padding:5px 8px;vertical-align:middle}
   </div>
   <div class="bottom">
     <div class="firma-box">
-      ${FIRMA_PABLO_B64?`<img src="${FIRMA_PABLO_B64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
+      ${empresaActual?.firma_b64?`<img src="${empresaActual.firma_b64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
       <div class="firma-lin"></div>
-      <div class="firma-emp">Constructora e Instalaciones PHH SpA</div>
-      <div class="firma-nom">Pablo Orlando Huaiquiman Herrera</div>
-      <div class="firma-car">Ingeniero Constructor · Ingeniero Civil Industrial</div>
+      <div class="firma-emp">${esc(empresaActual?.nombre_comercial || '')}</div>
+      <div class="firma-nom">${esc(empresaActual?.responsable_nombre || '')}</div>
+      <div class="firma-car">${esc(empresaActual?.responsable_cargo || '')}</div>
     </div>
   </div>
 </div>
@@ -2151,9 +2436,9 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="stripe-top"></div>
 <div class="hdr">
   <div>
-    <div class="co-name">Constructora e Instalaciones PHH SpA</div>
-    <div class="co-tag">Ingeniería y Construcción</div>
-    <div class="co-info">Chimborazo #1037 Dpto. 22 — Santiago &nbsp;·&nbsp; RUT: 77.234.145-8<br>contacto@phhspa.com &nbsp;·&nbsp; +56 9 3918 0369</div>
+    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
+    <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
+    <div class="co-info">${empresaInfoLineaHtml()}</div>
   </div>
   <div class="ppto-ref">
     <div class="ppto-lbl">N° Orden de Trabajo</div>
@@ -2196,11 +2481,11 @@ tbody td{padding:5px 8px;vertical-align:middle}
   </div>
   <div class="bottom">
     <div class="firma-box">
-      ${FIRMA_PABLO_B64?`<img src="${FIRMA_PABLO_B64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
+      ${empresaActual?.firma_b64?`<img src="${empresaActual.firma_b64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
       <div class="firma-lin"></div>
-      <div class="firma-emp">Constructora e Instalaciones PHH SpA</div>
-      <div class="firma-nom">Pablo Orlando Huaiquiman Herrera</div>
-      <div class="firma-car">Ingeniero Constructor · Ingeniero Civil Industrial</div>
+      <div class="firma-emp">${esc(empresaActual?.nombre_comercial || '')}</div>
+      <div class="firma-nom">${esc(empresaActual?.responsable_nombre || '')}</div>
+      <div class="firma-car">${esc(empresaActual?.responsable_cargo || '')}</div>
     </div>
     <div class="firma-box">
       ${ot.firma?.firmaB64?`<img src="${ot.firma.firmaB64}" alt="Firma cliente" style="height:50px;margin:0 auto 4px;display:block;">`:''}
