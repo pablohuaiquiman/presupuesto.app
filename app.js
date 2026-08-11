@@ -358,7 +358,18 @@ async function guardarCupo(empresaId) {
 // ════════════════════════════════════════════════════════
 function uid() { return `_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`; }
 
-function fmt(n) { return '$ ' + Math.round(n || 0).toLocaleString('es-CL'); }
+// Moneda / decimales usados por fmt() en el render/formulario actualmente activo.
+let monedaFmt    = 'CLP';
+let decimalesFmt = 0;
+
+function fmt(n) {
+    n = n || 0;
+    const numStr = n.toLocaleString('es-CL', { minimumFractionDigits: decimalesFmt, maximumFractionDigits: decimalesFmt });
+    return monedaFmt === 'UF' ? numStr + ' UF' : '$ ' + numStr;
+}
+
+// Decimales por defecto sugeridos según la moneda (el usuario puede cambiarlos).
+function decimalesPorDefecto(moneda) { return moneda === 'UF' ? 2 : 0; }
 
 function fmtFecha(iso) {
     if (!iso) return '—';
@@ -758,6 +769,8 @@ function guardarPresupuesto() {
         fecha: document.getElementById('p-fecha').value,
         validez: parseInt(document.getElementById('p-validez').value) || 30,
         condicion: document.getElementById('p-condicion').value,
+        moneda: document.getElementById('p-moneda').value || 'CLP',
+        decimales: parseInt(document.getElementById('p-decimales').value) || 0,
         cliente: {
             nombre, rut: document.getElementById('cli-rut').value.trim(),
             telefono: document.getElementById('cli-telefono').value.trim(),
@@ -803,6 +816,10 @@ function limpiarFormulario() {
     sc.disabled = true;
     document.getElementById('p-validez').value = '30';
     document.getElementById('p-condicion').selectedIndex = 0;
+    document.getElementById('p-moneda').value = 'CLP';
+    document.getElementById('p-decimales').value = '0';
+    monedaFmt = 'CLP';
+    decimalesFmt = 0;
     document.getElementById('gg-pct').value   = '15';
     document.getElementById('util-pct').value = '10';
     document.getElementById('usar-gg-util').checked = true;
@@ -814,6 +831,27 @@ function limpiarFormulario() {
     recalcularResumen();
     actualizarNumeroFormulario();
     actualizarUIModoEdicion();
+}
+
+// Cambia la moneda usada por fmt() en el formulario y refresca los montos ya escritos.
+function onCambioMoneda() {
+    monedaFmt = document.getElementById('p-moneda').value || 'CLP';
+    // Sugiere decimales acordes a la moneda elegida (el usuario puede cambiarlos después).
+    document.getElementById('p-decimales').value = decimalesPorDefecto(monedaFmt);
+    decimalesFmt = decimalesPorDefecto(monedaFmt);
+    refrescarMontosFormulario();
+}
+
+function onCambioDecimales() {
+    decimalesFmt = parseInt(document.getElementById('p-decimales').value) || 0;
+    refrescarMontosFormulario();
+}
+
+function refrescarMontosFormulario() {
+    document.querySelectorAll('#capitulos-container .item-cant').forEach(inp => {
+        recalcularFila(inp, inp.closest('tr')?.dataset.capId);
+    });
+    recalcularResumen();
 }
 
 // ════════════════════════════════════════════════════════
@@ -832,6 +870,8 @@ function renderEnviados() {
     vacio.classList.add('hidden');
 
     tbody.innerHTML = lista.map(p => {
+        monedaFmt = p.moneda || 'CLP';
+        decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
         const c = calcPresupuesto(p);
         return `<tr class="border-t border-slate-100 hover:bg-amber-50 transition-colors">
             <td class="px-4 py-3 font-mono text-xs font-bold text-blue-700">${esc(p.numero)}</td>
@@ -873,6 +913,10 @@ function editarPresupuesto(id) {
     document.getElementById('p-fecha').value     = p.fecha;
     document.getElementById('p-validez').value   = p.validez;
     document.getElementById('p-condicion').value = p.condicion;
+    document.getElementById('p-moneda').value    = p.moneda || 'CLP';
+    document.getElementById('p-decimales').value = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
+    monedaFmt = p.moneda || 'CLP';
+    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
 
     document.getElementById('cli-nombre').value    = p.cliente.nombre;
     document.getElementById('cli-rut').value       = p.cliente.rut || '';
@@ -959,6 +1003,8 @@ async function abrirModalContrato(id) {
     if (!p) return;
     if (p.estado === 'adjudicado') return toast('Este presupuesto ya está adjudicado', 'info');
     contratoActualId = id;
+    monedaFmt = p.moneda || 'CLP';
+    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
     const c = calcPresupuesto(p);
     document.getElementById('contrato-subtitulo').textContent = `${p.numero} — ${p.cliente.nombre}`;
     document.getElementById('contrato-resumen').innerHTML = `
@@ -1037,6 +1083,8 @@ function renderAdjudicados() {
     vacio.classList.toggle('hidden', lista.length > 0);
 
     grid.innerHTML = lista.map(p => {
+        monedaFmt = p.moneda || 'CLP';
+        decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
         const c           = calcPresupuesto(p);
         const cobrado     = calcCobradoTotal(p);
         const avancePct   = c.total > 0 ? Math.min((cobrado / c.total) * 100, 100) : 0;
@@ -1206,6 +1254,8 @@ async function generarLinkFirmaOT(presId, id) {
     const { error } = await supa.rpc('publicar_ot', {
         p_id: ot.id, p_numero: ot.numero, p_presupuesto_numero: p.numero,
         p_empresa_nombre: empresaActual?.nombre_comercial || null,
+        p_moneda: p.moneda || 'CLP',
+        p_decimales: p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP'),
         p_cliente_nombre: p.cliente.nombre, p_cliente_direccion: p.cliente.direccion,
         p_cliente_comuna: p.cliente.comuna, p_cliente_region: p.cliente.region,
         p_condicion: p.condicion, p_capitulos: p.capitulos,
@@ -1402,6 +1452,8 @@ function mostrarErrorRF(msg) {
 function renderDocumentoRF(ot) {
     document.getElementById('rf-cargando').classList.add('hidden');
     document.getElementById('rf-contenido').classList.remove('hidden');
+    monedaFmt = ot.moneda || 'CLP';
+    decimalesFmt = ot.decimales ?? decimalesPorDefecto(ot.moneda || 'CLP');
 
     document.getElementById('rf-empresa-nombre').textContent = ot.empresa_nombre || 'Orden de Trabajo';
     document.getElementById('rf-numero').textContent      = `${ot.numero} — ${ot.presupuesto_numero}`;
@@ -1564,6 +1616,8 @@ function cerrarPanelEDP() {
 function renderEDPPanel(presId) {
     const p  = presupuestos.find(x => x.id === presId);
     if (!p) return;
+    monedaFmt = p.moneda || 'CLP';
+    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
     const c  = calcPresupuesto(p);
     const cobrado  = calcCobradoTotal(p);
     const saldo    = Math.max(0, c.total - cobrado);
@@ -1676,6 +1730,8 @@ function renderEDPEditor(presId, edpId) {
     const p   = presupuestos.find(x => x.id === presId);
     const edp = p?.edps.find(x => x.id === edpId);
     if (!p || !edp) return;
+    monedaFmt = p.moneda || 'CLP';
+    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
 
     const iaMap = {};
     edp.itemsAvance.forEach(ia => { iaMap[ia.itemId] = ia; });
@@ -1798,6 +1854,8 @@ function recalcularItemEDP(input, presId, edpId) {
     const p   = presupuestos.find(x => x.id === presId);
     const edp = p?.edps.find(x => x.id === edpId);
     if (!p || !edp) return;
+    monedaFmt = p.moneda || 'CLP';
+    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
 
     const itemId   = input.dataset.itemId;
     const total    = parseFloat(input.dataset.itemTotal) || 0;
@@ -2182,7 +2240,11 @@ function exportarPDF(id) {
     if (!p) return toast('Presupuesto no encontrado','error');
     const c = calcPresupuesto(p);
     const h = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const M = n => '$ ' + Math.round(n||0).toLocaleString('es-CL');
+    const M = n => {
+        const dec = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
+        const numStr = (n||0).toLocaleString('es-CL', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        return p.moneda === 'UF' ? numStr + ' UF' : '$ ' + numStr;
+    };
     const FL = iso => { if(!iso) return '—'; const ms=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],[y,m,d]=iso.split('-'); return `${parseInt(d)} de ${ms[parseInt(m)-1]} de ${y}`; };
     const rc = [p.cliente.comuna, p.cliente.region].filter(Boolean).join(' — ');
 
@@ -2343,7 +2405,11 @@ function exportarOTPDF(presId, id) {
     if (!p || !ot) return toast('Orden de trabajo no encontrada','error');
     const c = calcPresupuesto(p);
     const h = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const M = n => '$ ' + Math.round(n||0).toLocaleString('es-CL');
+    const M = n => {
+        const dec = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
+        const numStr = (n||0).toLocaleString('es-CL', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        return p.moneda === 'UF' ? numStr + ' UF' : '$ ' + numStr;
+    };
     const FL = iso => { if(!iso) return '—'; const ms=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],[y,m,d]=iso.split('-'); return `${parseInt(d)} de ${ms[parseInt(m)-1]} de ${y}`; };
     const rc = [p.cliente.comuna, p.cliente.region].filter(Boolean).join(' — ');
 

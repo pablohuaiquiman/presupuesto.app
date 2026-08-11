@@ -289,7 +289,7 @@
                 </div>
 
                 <!-- Metadatos -->
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-slate-50 rounded-xl p-4 border border-slate-200">
                     <div><label class="campo-label">N° Presupuesto</label>
                         <input id="p-numero" type="text" readonly class="campo-input bg-slate-100 text-slate-400 cursor-not-allowed"></div>
                     <div><label class="campo-label">Fecha</label>
@@ -300,6 +300,16 @@
                         <select id="p-condicion" class="campo-input">
                             <option>Contado</option><option>30 días</option>
                             <option>60 días</option><option>Contra entrega</option><option>Por avance</option>
+                        </select></div>
+                    <div><label class="campo-label">Moneda</label>
+                        <select id="p-moneda" class="campo-input" onchange="onCambioMoneda()">
+                            <option value="CLP">Pesos ($)</option>
+                            <option value="UF">UF</option>
+                        </select></div>
+                    <div><label class="campo-label">Decimales</label>
+                        <select id="p-decimales" class="campo-input" onchange="onCambioDecimales()">
+                            <option value="0">Sin decimales</option>
+                            <option value="2">Con 2 decimales</option>
                         </select></div>
                 </div>
 

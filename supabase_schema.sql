@@ -12,6 +12,8 @@ create table if not exists public.ot_publicas (
   numero              text not null,
   presupuesto_numero  text not null,
   empresa_nombre      text,
+  moneda              text not null default 'CLP',
+  decimales           int not null default 0,
   cliente_nombre      text not null,
   cliente_direccion   text,
   cliente_comuna      text,
@@ -35,6 +37,8 @@ create table if not exists public.ot_publicas (
 );
 
 alter table public.ot_publicas add column if not exists empresa_nombre text;
+alter table public.ot_publicas add column if not exists moneda text not null default 'CLP';
+alter table public.ot_publicas add column if not exists decimales int not null default 0;
 
 alter table public.ot_publicas enable row level security;
 
@@ -45,8 +49,20 @@ alter table public.ot_publicas enable row level security;
 -- la anon key (que queda visible en el código público de la app) no puede listar
 -- ni curiosear las demás cotizaciones/firmas de otros clientes.
 
+-- Versiones anteriores tenían una firma distinta; hay que eliminarlas
+-- explícitamente o quedan como funciones sobrecargadas duplicadas.
+drop function if exists public.publicar_ot(
+  text, text, text, text, text, text, text, text, jsonb,
+  numeric, numeric, numeric, numeric, numeric, boolean, numeric, numeric, numeric
+);
+drop function if exists public.publicar_ot(
+  text, text, text, text, text, text, text, text, text, jsonb,
+  numeric, numeric, numeric, numeric, numeric, boolean, numeric, numeric, numeric
+);
+
 create or replace function public.publicar_ot(
   p_id text, p_numero text, p_presupuesto_numero text, p_empresa_nombre text,
+  p_moneda text, p_decimales int,
   p_cliente_nombre text, p_cliente_direccion text, p_cliente_comuna text, p_cliente_region text,
   p_condicion text, p_capitulos jsonb,
   p_costo_directo numeric, p_gg numeric, p_util numeric, p_gg_pct numeric, p_util_pct numeric,
@@ -55,14 +71,16 @@ create or replace function public.publicar_ot(
 language plpgsql security definer set search_path = public as $$
 begin
   insert into public.ot_publicas (
-    id, numero, presupuesto_numero, empresa_nombre, cliente_nombre, cliente_direccion, cliente_comuna, cliente_region,
+    id, numero, presupuesto_numero, empresa_nombre, moneda, decimales, cliente_nombre, cliente_direccion, cliente_comuna, cliente_region,
     condicion, capitulos, costo_directo, gg, util, gg_pct, util_pct, usar_gg_util, subtotal, iva, total
   ) values (
-    p_id, p_numero, p_presupuesto_numero, p_empresa_nombre, p_cliente_nombre, p_cliente_direccion, p_cliente_comuna, p_cliente_region,
+    p_id, p_numero, p_presupuesto_numero, p_empresa_nombre, coalesce(p_moneda,'CLP'), coalesce(p_decimales,0),
+    p_cliente_nombre, p_cliente_direccion, p_cliente_comuna, p_cliente_region,
     p_condicion, p_capitulos, p_costo_directo, p_gg, p_util, p_gg_pct, p_util_pct, p_usar_gg_util, p_subtotal, p_iva, p_total
   )
   on conflict (id) do update set
     numero = excluded.numero, presupuesto_numero = excluded.presupuesto_numero, empresa_nombre = excluded.empresa_nombre,
+    moneda = excluded.moneda, decimales = excluded.decimales,
     cliente_nombre = excluded.cliente_nombre, cliente_direccion = excluded.cliente_direccion,
     cliente_comuna = excluded.cliente_comuna, cliente_region = excluded.cliente_region,
     condicion = excluded.condicion, capitulos = excluded.capitulos,
