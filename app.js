@@ -53,11 +53,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('onboarding-form').addEventListener('submit', onSubmitOnboarding);
     document.getElementById('form-empresa').addEventListener('submit', onSubmitEmpresa);
     document.getElementById('form-invitar').addEventListener('submit', onSubmitInvitar);
+    document.getElementById('recuperar-form').addEventListener('submit', onSubmitRecuperar);
+    document.getElementById('nueva-password-form').addEventListener('submit', onSubmitNuevaPassword);
     iniciarApp();
 });
 
 async function iniciarApp() {
     if (!supa) { await arrancarAppPrincipal(); return; }
+
+    // El link del correo de recuperación vuelve con #type=recovery en la URL.
+    // Se detecta directo del hash (no dependemos del timing de onAuthStateChange).
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+    if (hashParams.get('type') === 'recovery') {
+        mostrarBloque('nueva-password');
+        mostrarSoloGate('login-gate');
+        return;
+    }
+    supa.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+            mostrarBloque('nueva-password');
+            mostrarSoloGate('login-gate');
+        }
+    });
+
     const { data: { session } } = await supa.auth.getSession();
     if (!session) { mostrarLogin(); return; }
     currentUserId = session.user.id;
@@ -73,7 +91,7 @@ function mostrarSoloGate(id) {
 }
 
 function mostrarBloque(which) {
-    ['login', 'signup', 'onboarding'].forEach(b => {
+    ['login', 'signup', 'onboarding', 'recuperar', 'nueva-password'].forEach(b => {
         document.getElementById('bloque-' + b).classList.toggle('hidden', b !== which);
     });
 }
@@ -148,6 +166,38 @@ async function onSubmitOnboarding(e) {
     errorEl.classList.add('hidden');
     const { error } = await supa.rpc('crear_empresa_y_admin', { p_nombre_comercial: nombreEmpresa, p_nombre_usuario: nombreUsuario });
     if (error) { errorEl.textContent = error.message; errorEl.classList.remove('hidden'); return; }
+    await resolverSesion();
+}
+
+async function onSubmitRecuperar(e) {
+    e.preventDefault();
+    const email = document.getElementById('recuperar-email').value.trim();
+    const msgEl = document.getElementById('recuperar-msg');
+    msgEl.className = 'text-xs hidden';
+    const { error } = await supa.auth.resetPasswordForEmail(email, {
+        redirectTo: location.origin + location.pathname,
+    });
+    msgEl.classList.remove('hidden');
+    if (error) {
+        msgEl.className = 'text-xs text-red-600';
+        msgEl.textContent = error.message;
+        return;
+    }
+    msgEl.className = 'text-xs text-emerald-600';
+    msgEl.textContent = 'Listo, revisa tu correo y sigue el link para elegir una contraseña nueva.';
+}
+
+async function onSubmitNuevaPassword(e) {
+    e.preventDefault();
+    const password = document.getElementById('nueva-password').value;
+    const errorEl = document.getElementById('nueva-password-error');
+    errorEl.classList.add('hidden');
+    const { data, error } = await supa.auth.updateUser({ password });
+    if (error) { errorEl.textContent = error.message; errorEl.classList.remove('hidden'); return; }
+    // Limpia el #type=recovery de la URL para no volver a caer en este formulario al recargar.
+    history.replaceState(null, '', location.pathname + location.search);
+    currentUserId = data.user.id;
+    toast('Contraseña actualizada', 'success');
     await resolverSesion();
 }
 
