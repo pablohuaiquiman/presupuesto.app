@@ -51,6 +51,7 @@
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
         input[type=number] { -moz-appearance:textfield; }
     </style>
+<link rel="stylesheet" href="platform.css?v=20261005b">
 </head>
 <body class="bg-slate-100 min-h-screen antialiased">
 
@@ -211,9 +212,11 @@
         </div>
     </div>
 </header>
+<div id="pl-switch" class="pl-switch hidden"><span>ESPACIO DE TRABAJO</span><button id="pl-mode-admin" onclick="Plataforma.cambiarModo('admin')">Administrar plataforma</button><button id="pl-mode-empresa" onclick="Plataforma.cambiarModo('empresa')">Trabajar en mi empresa</button></div>
+<div id="pl-banner" class="hidden" role="status"></div>
 
 <!-- ═══════════════ TABS ═══════════════ -->
-<nav class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+<nav id="company-nav" class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
     <div class="max-w-7xl mx-auto">
         <!-- Grid de 4 columnas iguales: siempre visible en cualquier ancho -->
         <div class="grid grid-cols-4">
@@ -301,6 +304,7 @@
                 <span class="text-xs sm:text-sm font-semibold leading-tight">Mi Empresa</span>
             </button>
 
+            <button id="nav-suscripcion" data-tab="tab-suscripcion" onclick="mostrarTab('tab-suscripcion')" class="hidden tab-btn text-sm font-semibold py-3 px-2 border-b-2 border-transparent text-slate-500">Mi suscripción</button>
             <!-- 7 · Empresas (solo superadmin) -->
             <button id="nav-superadmin" data-tab="tab-superadmin" onclick="mostrarTab('tab-superadmin')"
                 class="hidden tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
@@ -733,32 +737,8 @@
         </div>
     </section>
 
-    <!-- ══ TAB 7 · EMPRESAS (superadmin) ══ -->
-    <section id="tab-superadmin" class="tab-content hidden">
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div class="bg-gradient-to-r from-red-800 to-red-600 px-6 py-4">
-                <h2 class="text-white text-lg font-bold">Empresas registradas</h2>
-                <p class="text-red-200 text-xs mt-0.5">Aprueba cuentas nuevas y ajusta cupos de usuarios</p>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead class="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                            <th class="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase">Empresa</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Estado</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Usuarios</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Cupo</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold text-slate-500 uppercase">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="superadmin-tbody"></tbody>
-                </table>
-            </div>
-            <div id="superadmin-vacio" class="hidden p-14 text-center text-slate-400">
-                <p class="font-semibold">Sin empresas registradas todavía</p>
-            </div>
-        </div>
-    </section>
+<section id="tab-superadmin" class="tab-content hidden pl-platform"><div id="pl-admin"></div></section>
+<section id="tab-suscripcion" class="tab-content hidden pl-platform"><div id="pl-subscription"></div></section>
 </main>
 
 </div>
@@ -1027,7 +1007,9 @@
   </div>
 </div>
 
+<dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261005b"></script>
 <script src="app.js?v=20261005b"></script>
+<script src="platform.js?v=20261005b"></script>
 </body>
 </html>

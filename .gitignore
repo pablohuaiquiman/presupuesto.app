@@ -1,0 +1,7 @@
+tests/node_modules/
+tests/artifacts/
+supabase/.temp/
+backups/
+*.xls
+*.xlsx
+presupuestos pdf/

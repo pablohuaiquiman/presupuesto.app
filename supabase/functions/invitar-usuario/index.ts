@@ -41,6 +41,9 @@ Deno.serve(async (req) => {
     if (!perfil) return json({ error: 'No se encontró tu perfil' }, 404);
     if (perfil.rol !== 'admin') return json({ error: 'Solo el administrador de tu empresa puede invitar usuarios' }, 403);
 
+    const { data: acceso, error: accesoErr } = await supaCaller.rpc('estado_servicio', { p_empresa_id: perfil.empresa_id });
+    if (accesoErr || !acceso?.operativo) return json({ error: 'La empresa no tiene acceso operativo para invitar usuarios' }, 403);
+
     const { data: empresa } = await supaAdmin
       .from('empresas').select('limite_usuarios, aprobada').eq('id', perfil.empresa_id).single();
     if (!empresa?.aprobada) return json({ error: 'Tu empresa aún no está aprobada' }, 403);

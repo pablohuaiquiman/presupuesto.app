@@ -123,7 +123,9 @@ async function resolverSesion() {
     if (empresaErr || !empresa) { toast('No se pudo cargar tu empresa', 'error'); return; }
     empresaActual = empresa;
 
-    if (!empresa.aprobada && !perfil.es_superadmin) {
+    try { await Plataforma.resolverSesion(); }
+    catch (error) { toast(error.message, 'error'); mostrarLogin(); return; }
+    if (!Plataforma.disponible && !empresa.aprobada && !perfil.es_superadmin) {
         document.getElementById('pending-empresa-nombre').textContent = empresa.nombre_comercial;
         mostrarSoloGate('pending-gate');
         return;
@@ -216,7 +218,8 @@ async function cerrarSesion() {
 }
 
 async function arrancarAppPrincipal() {
-    await cargarDB();
+    if (!Plataforma.disponible || Plataforma.puedeOperar()) await cargarDB();
+    else presupuestos = [];
     initFecha();
     initRegiones();
     actualizarListaClientes();
@@ -229,11 +232,8 @@ async function arrancarAppPrincipal() {
     aplicarBranding();
     cargarFormularioEmpresa();
     cargarEquipo();
-    if (miPerfil?.es_superadmin) {
-        document.getElementById('nav-superadmin').classList.remove('hidden');
-        cargarSuperadmin();
-    }
     mostrarSoloGate('app-shell');
+    await Plataforma.iniciar();
 }
 
 // ════════════════════════════════════════════════════════
@@ -254,6 +254,7 @@ async function cargarDB() {
     });
 }
 function guardarDB() {
+    if (Plataforma.disponible && !Plataforma.puedeOperar()) { toast('La empresa no tiene acceso operativo', 'error'); return; }
     if (supa && empresaActual) {
         const rows = presupuestos.map(p => ({ id: p.id, empresa_id: empresaActual.id, data: p, updated_at: new Date().toISOString() }));
         if (rows.length) {
@@ -429,61 +430,7 @@ async function onSubmitInvitar(e) {
 // ════════════════════════════════════════════════════════
 // EMPRESAS (panel superadmin)
 // ════════════════════════════════════════════════════════
-async function cargarSuperadmin() {
-    const tbody = document.getElementById('superadmin-tbody');
-    const vacio = document.getElementById('superadmin-vacio');
-    const { data, error } = await supa.from('empresas').select('*, perfiles(count)').order('creado_en', { ascending: false });
-    if (error) { tbody.innerHTML = ''; vacio.classList.remove('hidden'); vacio.querySelector('p').textContent = error.message; return; }
-    if (!data.length) { tbody.innerHTML = ''; vacio.classList.remove('hidden'); return; }
-    vacio.classList.add('hidden');
-
-    tbody.innerHTML = data.map(e => {
-        const usados = e.perfiles?.[0]?.count ?? 0;
-        return `
-        <tr class="border-t border-slate-100">
-            <td class="px-4 py-3">
-                <p class="font-semibold text-slate-800 text-sm">${esc(e.nombre_comercial)}</p>
-                <p class="text-xs text-slate-400">${esc(e.rut || '')}</p>
-            </td>
-            <td class="px-4 py-3 text-center">
-                ${e.aprobada
-                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold">Aprobada</span>`
-                    : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">Pendiente</span>`}
-            </td>
-            <td class="px-4 py-3 text-center text-sm">${usados}</td>
-            <td class="px-4 py-3 text-center">
-                <input type="number" min="1" value="${e.limite_usuarios}" id="cupo-${e.id}" class="campo-input w-16 text-center">
-            </td>
-            <td class="px-4 py-3">
-                <div class="flex justify-center gap-1.5 flex-wrap">
-                    <button onclick="guardarCupo('${e.id}')" class="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-bold transition-colors">Guardar cupo</button>
-                    ${e.aprobada
-                        ? `<button onclick="cambiarAprobacion('${e.id}', false)" class="text-xs px-3 py-1.5 border border-red-300 text-red-500 hover:bg-red-50 rounded-lg font-medium transition-colors">Suspender</button>`
-                        : `<button onclick="cambiarAprobacion('${e.id}', true)" class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">Aprobar</button>`}
-                </div>
-            </td>
-        </tr>`;
-    }).join('');
-
-    const pendientes = data.filter(e => !e.aprobada).length;
-    document.getElementById('badge-superadmin').textContent = pendientes;
-    document.getElementById('badge-superadmin').classList.toggle('hidden', pendientes === 0);
-}
-
-async function cambiarAprobacion(empresaId, aprobada) {
-    const { error } = await supa.rpc('aprobar_empresa', { p_empresa_id: empresaId, p_aprobada: aprobada });
-    if (error) return toast('Error: ' + error.message, 'error');
-    toast(aprobada ? 'Empresa aprobada' : 'Empresa suspendida', 'success');
-    cargarSuperadmin();
-}
-
-async function guardarCupo(empresaId) {
-    const val = parseInt(document.getElementById(`cupo-${empresaId}`).value) || 1;
-    const { error } = await supa.rpc('set_limite_usuarios', { p_empresa_id: empresaId, p_limite: val });
-    if (error) return toast('Error: ' + error.message, 'error');
-    toast('Cupo actualizado', 'success');
-    cargarSuperadmin();
-}
+async function cargarSuperadmin() { return Plataforma.cargarAdmin(); }
 
 // ════════════════════════════════════════════════════════
 // UTILIDADES
@@ -558,6 +505,7 @@ function generarNumero() {
 // NAVEGACIÓN DE PESTAÑAS
 // ════════════════════════════════════════════════════════
 function mostrarTab(tabId) {
+    if (!Plataforma.navegarPermitido(tabId)) { toast('Tu cuenta no tiene acceso a esta sección', 'error'); return; }
     // Ocultar todos los paneles
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
@@ -581,6 +529,7 @@ function mostrarTab(tabId) {
     if (tabId === 'tab-firma')       renderSelectFirma();
     if (tabId === 'tab-empresa')     cargarEquipo();
     if (tabId === 'tab-superadmin')  cargarSuperadmin();
+    if (tabId === 'tab-suscripcion') Plataforma.cargarMiSuscripcion();
 }
 
 function actualizarBadges() {
@@ -1440,6 +1389,8 @@ async function generarLinkFirmaOT(presId, id) {
     if (!p || !ot) return;
     const c = calcPresupuesto(p);
 
+    const { error: guardarError } = await supa.from('presupuestos').upsert([{ id: p.id, empresa_id: empresaActual.id, data: p, updated_at: new Date().toISOString() }]);
+    if (guardarError) return toast('No se pudo guardar la orden antes de publicar: ' + guardarError.message, 'error');
     toast('Publicando…', 'info');
     const { error } = await supa.rpc('publicar_ot', {
         p_id: ot.id, p_numero: ot.numero, p_presupuesto_numero: p.numero,
