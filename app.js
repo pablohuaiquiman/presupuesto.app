@@ -101,6 +101,15 @@ function mostrarLogin() {
     mostrarSoloGate('login-gate');
 }
 
+// Muestra/oculta el texto de un campo de contraseña y alterna el ícono de ojo.
+function togglePassword(inputId, btn) {
+    const input = document.getElementById(inputId);
+    const verActualmente = input.type === 'password';
+    input.type = verActualmente ? 'text' : 'password';
+    btn.querySelector('.ojo-abierto').classList.toggle('hidden', verActualmente);
+    btn.querySelector('.ojo-cerrado').classList.toggle('hidden', !verActualmente);
+}
+
 // Se llama después de cualquier inicio de sesión exitoso (login, registro
 // con sesión inmediata, o vuelta desde confirmación de correo). Decide qué
 // pantalla mostrar según si el usuario tiene empresa y si está aprobada.
