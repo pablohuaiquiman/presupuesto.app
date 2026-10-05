@@ -264,6 +264,19 @@ function aplicarBranding() {
     const nombre = empresaActual?.nombre_comercial || 'Presupuestos App';
     document.getElementById('header-empresa-nombre').textContent = nombre;
     document.title = nombre;
+
+    const logo  = empresaActual?.logo_b64;
+    const img   = document.getElementById('header-logo-img');
+    const badge = document.getElementById('header-logo-badge');
+    if (logo) {
+        img.src = logo;
+        img.classList.remove('hidden');
+        badge.classList.add('hidden');
+    } else {
+        img.classList.add('hidden');
+        badge.classList.remove('hidden');
+        document.getElementById('header-logo-letra').textContent = nombre.trim().charAt(0).toUpperCase() || 'P';
+    }
 }
 
 function empresaInfoLineaHtml() {
@@ -272,6 +285,9 @@ function empresaInfoLineaHtml() {
     const l2 = [e.email_contacto, e.telefono].filter(Boolean).map(esc).join(' &nbsp;·&nbsp; ');
     return [l1, l2].filter(Boolean).join('<br>');
 }
+
+// undefined = sin cambios al logo; null = se quitó; string = logo nuevo (dataURL)
+let logoB64Pendiente;
 
 function cargarFormularioEmpresa() {
     const e = empresaActual || {};
@@ -283,6 +299,60 @@ function cargarFormularioEmpresa() {
     document.getElementById('emp-email').value = e.email_contacto || '';
     document.getElementById('emp-responsable-nombre').value = e.responsable_nombre || '';
     document.getElementById('emp-responsable-cargo').value = e.responsable_cargo || '';
+    logoB64Pendiente = undefined;
+    document.getElementById('emp-logo-file').value = '';
+    mostrarPreviewLogo(e.logo_b64 || null);
+}
+
+function mostrarPreviewLogo(src) {
+    const img      = document.getElementById('emp-logo-preview');
+    const vacio    = document.getElementById('emp-logo-vacio');
+    const btnQuitar = document.getElementById('emp-logo-quitar');
+    if (src) {
+        img.src = src;
+        img.classList.remove('hidden');
+        vacio.classList.add('hidden');
+        btnQuitar.classList.remove('hidden');
+    } else {
+        img.src = '';
+        img.classList.add('hidden');
+        vacio.classList.remove('hidden');
+        btnQuitar.classList.add('hidden');
+    }
+}
+
+// Lee la imagen elegida, la reduce a un tamaño razonable (máx. 320px) y la
+// deja lista en memoria como dataURL; se guarda recién al enviar el form.
+function previewLogoEmpresa(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast('Selecciona un archivo de imagen', 'error');
+    const reader = new FileReader();
+    reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+            const maxDim = 320;
+            let { width, height } = img;
+            if (width > maxDim || height > maxDim) {
+                const ratio = Math.min(maxDim / width, maxDim / height);
+                width = Math.round(width * ratio);
+                height = Math.round(height * ratio);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            logoB64Pendiente = canvas.toDataURL('image/png');
+            mostrarPreviewLogo(logoB64Pendiente);
+        };
+        img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function quitarLogoEmpresa() {
+    logoB64Pendiente = null;
+    document.getElementById('emp-logo-file').value = '';
+    mostrarPreviewLogo(null);
 }
 
 async function onSubmitEmpresa(e) {
@@ -296,10 +366,12 @@ async function onSubmitEmpresa(e) {
         email_contacto: document.getElementById('emp-email').value.trim(),
         responsable_nombre: document.getElementById('emp-responsable-nombre').value.trim(),
         responsable_cargo: document.getElementById('emp-responsable-cargo').value.trim(),
+        logo_b64: logoB64Pendiente !== undefined ? logoB64Pendiente : (empresaActual.logo_b64 || null),
     };
     const { error } = await supa.from('empresas').update(datos).eq('id', empresaActual.id);
     if (error) return toast('No se pudo guardar: ' + error.message, 'error');
     Object.assign(empresaActual, datos);
+    logoB64Pendiente = undefined;
     aplicarBranding();
     toast('Datos de la empresa guardados', 'success');
 }
@@ -2385,6 +2457,7 @@ function exportarPDF(id) {
 .page{display:flex;flex-direction:column}
 .stripe-top{height:5px;background:linear-gradient(90deg,#d97706,#f59e0b,#fbbf24)}
 .hdr{background:#0a0f1e;padding:26px 38px 22px;display:flex;justify-content:space-between;align-items:flex-start}
+.co-logo{max-height:42px;max-width:150px;margin-bottom:8px;display:block}
 .co-name{font-size:14.5pt;font-weight:900;color:#fff;letter-spacing:1px;text-transform:uppercase}
 .co-tag{font-size:7.5pt;color:#d97706;letter-spacing:3px;text-transform:uppercase;margin-top:5px;font-weight:600}
 .co-info{font-size:7.5pt;color:#64748b;margin-top:10px;line-height:1.9}
@@ -2445,6 +2518,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="stripe-top"></div>
 <div class="hdr">
   <div>
+    ${empresaActual?.logo_b64?`<img src="${empresaActual.logo_b64}" alt="Logo" class="co-logo">`:''}
     <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
     <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
     <div class="co-info">${empresaInfoLineaHtml()}</div>
@@ -2550,6 +2624,7 @@ function exportarOTPDF(presId, id) {
 .page{display:flex;flex-direction:column}
 .stripe-top{height:5px;background:linear-gradient(90deg,#4338ca,#6366f1,#818cf8)}
 .hdr{background:#0a0f1e;padding:26px 38px 22px;display:flex;justify-content:space-between;align-items:flex-start}
+.co-logo{max-height:42px;max-width:150px;margin-bottom:8px;display:block}
 .co-name{font-size:14.5pt;font-weight:900;color:#fff;letter-spacing:1px;text-transform:uppercase}
 .co-tag{font-size:7.5pt;color:#818cf8;letter-spacing:3px;text-transform:uppercase;margin-top:5px;font-weight:600}
 .co-info{font-size:7.5pt;color:#64748b;margin-top:10px;line-height:1.9}
@@ -2611,6 +2686,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="stripe-top"></div>
 <div class="hdr">
   <div>
+    ${empresaActual?.logo_b64?`<img src="${empresaActual.logo_b64}" alt="Logo" class="co-logo">`:''}
     <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
     <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
     <div class="co-info">${empresaInfoLineaHtml()}</div>

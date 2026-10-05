@@ -178,8 +178,9 @@
 <header class="bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-xl">
     <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-11 h-11 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
-                <span class="text-white font-black text-xl">P</span>
+            <img id="header-logo-img" class="w-11 h-11 rounded-xl object-contain bg-white shadow-lg hidden" alt="Logo">
+            <div id="header-logo-badge" class="w-11 h-11 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
+                <span id="header-logo-letra" class="text-white font-black text-xl">P</span>
             </div>
             <div>
                 <h1 id="header-empresa-nombre" class="text-lg font-black tracking-wide">Presupuestos App</h1>
@@ -642,6 +643,23 @@
                 <p class="text-slate-300 text-xs mt-0.5">Aparecen en tus presupuestos, órdenes de trabajo y PDF</p>
             </div>
             <form id="form-empresa" class="p-6 grid sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="text-xs font-semibold text-slate-500">Logo de la empresa</label>
+                    <div class="flex items-center gap-4 mt-1">
+                        <div class="w-20 h-20 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                            <img id="emp-logo-preview" class="w-full h-full object-contain hidden" alt="Logo">
+                            <span id="emp-logo-vacio" class="text-xs text-slate-400 text-center px-1">Sin logo</span>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="cursor-pointer text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg transition-colors inline-block w-fit">
+                                Subir imagen
+                                <input id="emp-logo-file" type="file" accept="image/*" class="hidden" onchange="previewLogoEmpresa(event)">
+                            </label>
+                            <button type="button" id="emp-logo-quitar" onclick="quitarLogoEmpresa()" class="text-xs text-red-500 hover:text-red-700 font-semibold hidden w-fit">Quitar logo</button>
+                            <p class="text-[11px] text-slate-400">PNG o JPG. Aparece en el encabezado, cotizaciones y órdenes de trabajo.</p>
+                        </div>
+                    </div>
+                </div>
                 <div class="sm:col-span-2">
                     <label class="text-xs font-semibold text-slate-500">Nombre comercial</label>
                     <input id="emp-nombre-comercial" required class="campo-input w-full">

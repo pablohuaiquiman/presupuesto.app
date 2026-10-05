@@ -125,12 +125,15 @@ create table if not exists public.empresas (
   telefono           text,
   email_contacto     text,
   firma_b64          text,
+  logo_b64           text,
   responsable_nombre text,
   responsable_cargo  text,
   limite_usuarios    int not null default 1,
   aprobada           boolean not null default false,
   creado_en          timestamptz not null default now()
 );
+
+alter table public.empresas add column if not exists logo_b64 text;
 
 create table if not exists public.perfiles (
   id             uuid primary key references auth.users(id) on delete cascade,
@@ -169,7 +172,7 @@ grant select on public.empresas to authenticated;
 -- Los datos de negocio los edita el propio admin; el límite de cupos y la
 -- aprobación SOLO se cambian a través de las funciones de más abajo
 -- (para que ningún cliente pueda auto-aprobarse ni subirse el cupo solo).
-grant update (nombre_comercial, razon_social, rut, direccion, telefono, email_contacto, firma_b64, responsable_nombre, responsable_cargo)
+grant update (nombre_comercial, razon_social, rut, direccion, telefono, email_contacto, firma_b64, logo_b64, responsable_nombre, responsable_cargo)
   on public.empresas to authenticated;
 
 grant select on public.perfiles to authenticated;
