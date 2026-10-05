@@ -210,6 +210,7 @@ async function arrancarAppPrincipal() {
     await cargarDB();
     initFecha();
     initRegiones();
+    actualizarListaClientes();
     initFirmaContrato();
     initFirmaStandalone();
     initFirmaOT();
@@ -539,6 +540,62 @@ function filtrarComunas() {
 }
 
 // ════════════════════════════════════════════════════════
+// AUTOCOMPLETAR CLIENTE (recuerda clientes ya cotizados antes)
+// ════════════════════════════════════════════════════════
+function normRut(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Un cliente por nombre y uno por RUT, quedándose con los datos del
+// presupuesto más reciente en que aparece cada uno.
+function clientesUnicos() {
+    const porNombre = new Map();
+    const porRut = new Map();
+    presupuestos.forEach(p => {
+        const c = p.cliente;
+        if (!c || !c.nombre) return;
+        porNombre.set(c.nombre.trim().toLowerCase(), c);
+        if (c.rut && c.rut.trim()) porRut.set(normRut(c.rut), c);
+    });
+    return { porNombre, porRut };
+}
+
+// Refresca las sugerencias (datalist) de nombre y RUT con los clientes
+// de presupuestos anteriores, para que el navegador los ofrezca al escribir.
+function actualizarListaClientes() {
+    const { porNombre, porRut } = clientesUnicos();
+    document.getElementById('lista-clientes-nombres').innerHTML =
+        [...porNombre.values()].map(c => `<option value="${esc(c.nombre)}">`).join('');
+    document.getElementById('lista-clientes-ruts').innerHTML =
+        [...porRut.values()].map(c => `<option value="${esc(c.rut)}">`).join('');
+}
+
+// Si el nombre o RUT ingresado coincide con un cliente ya cotizado antes,
+// completa el resto de sus datos automáticamente.
+function autocompletarCliente(origen) {
+    if (editandoId) return; // no pisar datos al editar un presupuesto existente
+    const { porNombre, porRut } = clientesUnicos();
+    let c = null;
+    if (origen === 'nombre') {
+        const v = document.getElementById('cli-nombre').value.trim().toLowerCase();
+        if (v) c = porNombre.get(v);
+    } else {
+        const v = normRut(document.getElementById('cli-rut').value);
+        if (v) c = porRut.get(v);
+    }
+    if (!c) return;
+
+    document.getElementById('cli-nombre').value    = c.nombre || '';
+    document.getElementById('cli-rut').value       = c.rut || '';
+    document.getElementById('cli-telefono').value  = c.telefono || '';
+    document.getElementById('cli-direccion').value = c.direccion || '';
+    document.getElementById('cli-region').value    = c.region || '';
+    filtrarComunas();
+    document.getElementById('cli-comuna').value    = c.comuna || '';
+    toast('Datos del cliente autocompletados', 'success');
+}
+
+// ════════════════════════════════════════════════════════
 // TAB 1 · CONSTRUCTOR DE CAPÍTULOS Y PARTIDAS
 // ════════════════════════════════════════════════════════
 
@@ -837,6 +894,7 @@ function guardarPresupuesto() {
         Object.assign(p, datos);
         guardarDB();
         actualizarBadges();
+        actualizarListaClientes();
         toast(`Presupuesto ${p.numero} actualizado`, 'success');
         limpiarFormulario();
         mostrarTab('tab-enviados');
@@ -852,6 +910,7 @@ function guardarPresupuesto() {
     presupuestos.push(p);
     guardarDB();
     actualizarBadges();
+    actualizarListaClientes();
     toast(`Presupuesto ${p.numero} guardado`, 'success');
     limpiarFormulario();
 }

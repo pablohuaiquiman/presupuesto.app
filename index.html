@@ -353,10 +353,12 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div class="sm:col-span-2 lg:col-span-1">
                             <label class="campo-label">Nombre / Razón Social <span class="text-red-400">*</span></label>
-                            <input id="cli-nombre" type="text" placeholder="Nombre o empresa" class="campo-input">
+                            <input id="cli-nombre" type="text" placeholder="Nombre o empresa" class="campo-input" list="lista-clientes-nombres" oninput="autocompletarCliente('nombre')" autocomplete="off">
+                            <datalist id="lista-clientes-nombres"></datalist>
                         </div>
                         <div><label class="campo-label">RUT</label>
-                            <input id="cli-rut" type="text" placeholder="12.345.678-9" class="campo-input"></div>
+                            <input id="cli-rut" type="text" placeholder="12.345.678-9" class="campo-input" list="lista-clientes-ruts" oninput="autocompletarCliente('rut')" autocomplete="off">
+                            <datalist id="lista-clientes-ruts"></datalist></div>
                         <div><label class="campo-label">Teléfono</label>
                             <input id="cli-telefono" type="tel" placeholder="+56 9 1234 5678" class="campo-input"></div>
                         <div class="sm:col-span-2">
