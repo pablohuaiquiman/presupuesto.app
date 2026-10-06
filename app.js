@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-// app.js — Presupuestos App  (arquitectura Itemizar, multiempresa)
+// app.js — Presupuestos Pro  (arquitectura Itemizar, multiempresa)
 // Capítulos → Partidas; la ejecución (estados de pago, gastos) vive en proyectos.js
 // ═══════════════════════════════════════════════════════════
 
@@ -266,12 +266,20 @@ function guardarDB() {
 // ════════════════════════════════════════════════════════
 // MI EMPRESA — branding, equipo, invitaciones
 // ════════════════════════════════════════════════════════
-function aplicarBranding() {
-    const nombre = empresaActual?.nombre_comercial || 'Presupuestos App';
-    document.getElementById('header-empresa-nombre').textContent = nombre;
-    document.title = nombre;
+const APP_NOMBRE = 'PRESUPUESTOS PRO';
+const APP_LOGO = 'assets/presupuestos-pro-192.png';
 
-    const logo  = empresaActual?.logo_b64;
+// En modo "Administrar plataforma" se muestra la marca de la app; al trabajar en la empresa, la de la empresa.
+function aplicarBranding() {
+    const modoAdmin = typeof Plataforma !== 'undefined' && Plataforma.modo === 'admin';
+    const nombre = modoAdmin ? APP_NOMBRE : (empresaActual?.nombre_comercial || 'Presupuestos Pro');
+    document.getElementById('header-empresa-nombre').textContent = nombre;
+    document.getElementById('header-subtitulo').textContent = modoAdmin
+        ? 'Administración de empresas y suscripciones'
+        : 'Cotizaciones, órdenes de trabajo y firma digital';
+    document.title = modoAdmin ? 'Presupuestos Pro · Administración' : nombre;
+
+    const logo  = modoAdmin ? APP_LOGO : empresaActual?.logo_b64;
     const img   = document.getElementById('header-logo-img');
     const badge = document.getElementById('header-logo-badge');
     if (logo) {
@@ -516,6 +524,7 @@ function mostrarTab(tabId) {
         btn.classList.toggle('border-transparent',!activo);
         btn.classList.toggle('text-slate-500',    !activo);
         btn.classList.toggle('bg-transparent',    !activo);
+        if (activo && btn.offsetParent) btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     });
 
     // Renderizar contenido del tab destino
@@ -2091,7 +2100,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="hdr">
   <div>
     ${empresaActual?.logo_b64?`<img src="${empresaActual.logo_b64}" alt="Logo" class="co-logo">`:''}
-    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
+    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos Pro')}</div>
     <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
     <div class="co-info">${empresaInfoLineaHtml()}</div>
   </div>
@@ -2259,7 +2268,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
 <div class="hdr">
   <div>
     ${empresaActual?.logo_b64?`<img src="${empresaActual.logo_b64}" alt="Logo" class="co-logo">`:''}
-    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos App')}</div>
+    <div class="co-name">${esc(empresaActual?.nombre_comercial || 'Presupuestos Pro')}</div>
     <div class="co-tag">${esc(empresaActual?.razon_social || '')}</div>
     <div class="co-info">${empresaInfoLineaHtml()}</div>
   </div>

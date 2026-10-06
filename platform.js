@@ -114,6 +114,7 @@ const Plataforma = (() => {
         });
         $('pl-mode-admin').classList.toggle('pl-selected',modo === 'admin');
         $('pl-mode-empresa').classList.toggle('pl-selected',modo === 'empresa');
+        aplicarBranding();
     }
     function cambiarModo(nuevo) {
         if (nuevo === 'admin' && !miPerfil?.es_superadmin) return;
@@ -137,7 +138,7 @@ const Plataforma = (() => {
             const vencidas=empresas.filter(e => resumen(e,suscripciones.find(s => s.empresa_id===e.id)).estado_pago === 'vencida').length;
             root.innerHTML='<div class="pl-heading"><div><p class="pl-eyebrow">ADMINISTRACIÓN DE PLATAFORMA</p><h2>Empresas y suscripciones</h2><p>Controla el acceso, los cupos y los pagos mensuales desde un solo lugar.</p></div><button class="pl-button" data-action="refresh">Actualizar</button></div>' +
                 '<div class="pl-stats">' + [[empresas.length,'Empresas registradas'],[activas,'Con acceso operativo'],[vencidas,'Suscripciones vencidas'],[clp(recibidos),'Pagos recibidos este mes']].map(([n,label]) => '<div class="pl-stat"><strong>'+h(n)+'</strong><span>'+label+'</span></div>').join('') + '</div>' +
-                '<div class="pl-card"><div class="pl-filters"><label class="pl-field">Buscar empresa<input id="pl-search" type="search" placeholder="Nombre, RUT o correo"></label><label class="pl-field">Acceso<select id="pl-filter-access"><option value="">Todos</option>'+estados('')+'</select></label><label class="pl-field">Suscripción<select id="pl-filter-pay"><option value="">Todas</option>'+['sin_configurar','programada','al_dia','en_gracia','vencida','cancelada'].map(s => opcion(s,etiquetas[s],false)).join('')+'</select></label></div><div class="pl-table-wrap"><table class="pl-table"><thead><tr><th>Empresa</th><th>Acceso</th><th>Suscripción</th><th>Usuarios</th><th>Vencimiento</th><th></th></tr></thead><tbody id="pl-companies"></tbody></table></div><p id="pl-result-count" class="pl-footnote" aria-live="polite"></p></div>';
+                '<div class="pl-card"><div class="pl-filters"><label class="pl-field">Buscar empresa<input id="pl-search" type="search" placeholder="Nombre, RUT o correo"></label><label class="pl-field">Acceso<select id="pl-filter-access"><option value="">Todos</option>'+estados('')+'</select></label><label class="pl-field">Suscripción<select id="pl-filter-pay"><option value="">Todas</option>'+['sin_configurar','programada','al_dia','en_gracia','vencida','cancelada'].map(s => opcion(s,etiquetas[s],false)).join('')+'</select></label></div><div class="pl-table-wrap"><table class="pl-table pl-table-cards"><thead><tr><th>Empresa</th><th>Acceso</th><th>Suscripción</th><th>Usuarios</th><th>Vencimiento</th><th></th></tr></thead><tbody id="pl-companies"></tbody></table></div><p id="pl-result-count" class="pl-footnote" aria-live="polite"></p></div>';
             ['pl-search','pl-filter-access','pl-filter-pay'].forEach(id => $(id).addEventListener('input',renderEmpresas));
             renderEmpresas();
         } catch(error) {
@@ -157,7 +158,7 @@ const Plataforma = (() => {
             const nombre=h(e.nombre_comercial), contacto=h(e.rut || e.email_contacto || 'Sin datos de contacto');
             const accesoBadge=badge(e.estado_acceso), pagoBadge=badge(r.estado_pago);
             const plan=h(s?.plan_nombre || (e.acceso_transitorio ? 'Transición sin cobro' : 'Requiere un plan')), usados=e.perfiles?.[0]?.count ?? 0;
-            return '<tr><td><strong>'+nombre+'</strong><small>'+contacto+'</small></td><td>'+accesoBadge+'</td><td>'+pagoBadge+'<small>'+plan+'</small></td><td>'+usados+' / '+e.limite_usuarios+'</td><td>'+fecha(r.vencimiento)+'</td><td><button class="pl-button" data-action="detail" data-id="'+h(e.id)+'">Gestionar</button></td></tr>';
+            return '<tr><td data-label="Empresa"><strong>'+nombre+'</strong><small>'+contacto+'</small></td><td data-label="Acceso">'+accesoBadge+'</td><td data-label="Suscripción">'+pagoBadge+'<small>'+plan+'</small></td><td data-label="Usuarios">'+usados+' / '+e.limite_usuarios+'</td><td data-label="Vencimiento">'+fecha(r.vencimiento)+'</td><td class="pl-actions"><button class="pl-button" data-action="detail" data-id="'+h(e.id)+'">Gestionar</button></td></tr>';
         }).join('') || '<tr><td colspan="6" class="pl-empty">No hay empresas que coincidan con los filtros.</td></tr>';
         $('pl-result-count').textContent=filtradas.length+' de '+empresas.length+' empresas · Moneda de suscripciones: CLP';
     }
@@ -270,6 +271,7 @@ const Plataforma = (() => {
     });
     return {resolverSesion,iniciar,puedeOperar,navegarPermitido,cambiarModo,cargarAdmin,cargarMiSuscripcion,
         get disponible(){return disponible;},
+        get modo(){return modo;},
         test:{fechaCiclo,sumarDias,resumen,hoyChile,h}
     };
 })();

@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Presupuestos App</title>
+    <title>Presupuestos Pro</title>
+    <meta name="theme-color" content="#0f172a">
+    <link rel="icon" type="image/png" href="assets/presupuestos-pro-64.png">
+    <link rel="apple-touch-icon" href="assets/presupuestos-pro-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="styles.css?v=20261006a">
+    <link rel="stylesheet" href="styles.css?v=20261006c">
     <style>
         .campo-label { display:block; font-size:.75rem; font-weight:700; color:#475569; margin-bottom:.25rem; }
         .campo-input  { display:block; width:100%; padding:.5rem .75rem; border:1px solid #cbd5e1;
@@ -47,21 +50,17 @@
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
         input[type=number] { -moz-appearance:textfield; }
     </style>
-<link rel="stylesheet" href="platform.css?v=20261006a">
+<link rel="stylesheet" href="platform.css?v=20261006c">
 </head>
 <body class="bg-slate-100 min-h-screen antialiased">
 
 <!-- ═══════════════ LOGIN / REGISTRO ═══════════════ -->
 <div id="login-gate" class="hidden min-h-screen flex items-center justify-center px-4 py-10">
     <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm">
-        <div class="flex items-center gap-3 mb-6">
-            <div class="w-11 h-11 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
-                <span class="text-white font-black text-xl">P</span>
-            </div>
-            <div>
-                <h1 class="text-lg font-black tracking-wide text-slate-800">Presupuestos App</h1>
-                <p class="text-slate-400 text-xs">Cotizaciones, órdenes de trabajo y firma digital</p>
-            </div>
+        <div class="flex flex-col items-center text-center mb-6">
+            <img src="assets/presupuestos-pro-192.png" alt="Presupuestos Pro" class="w-24 h-24 object-contain mb-2">
+            <h1 class="text-lg font-black tracking-wide text-slate-800">PRESUPUESTOS PRO</h1>
+            <p class="text-slate-400 text-xs">Cotizaciones, órdenes de trabajo y firma digital</p>
         </div>
 
         <!-- Iniciar sesión -->
@@ -191,20 +190,20 @@
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header class="bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-xl">
-    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-            <img id="header-logo-img" class="w-11 h-11 rounded-xl object-contain bg-white shadow-lg hidden" alt="Logo">
-            <div id="header-logo-badge" class="w-11 h-11 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
+    <div class="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <img id="header-logo-img" class="w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl object-contain bg-white shadow-lg hidden" alt="Logo">
+            <div id="header-logo-badge" class="w-10 h-10 sm:w-11 sm:h-11 shrink-0 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg">
                 <span id="header-logo-letra" class="text-white font-black text-xl">P</span>
             </div>
-            <div>
-                <h1 id="header-empresa-nombre" class="text-lg font-black tracking-wide">Presupuestos App</h1>
-                <p class="text-slate-400 text-xs">Cotizaciones, órdenes de trabajo y firma digital</p>
+            <div class="min-w-0">
+                <h1 id="header-empresa-nombre" class="text-base sm:text-lg font-black tracking-wide leading-tight line-clamp-2 break-words">Presupuestos Pro</h1>
+                <p id="header-subtitulo" class="text-slate-400 text-[11px] sm:text-xs truncate">Cotizaciones, órdenes de trabajo y firma digital</p>
             </div>
         </div>
-        <div class="flex items-center gap-4">
-            <div id="header-fecha" class="text-right text-xs text-slate-400 hidden sm:block"></div>
-            <button onclick="cerrarSesion()" class="text-xs text-slate-300 hover:text-white border border-slate-600 hover:border-slate-400 rounded-lg px-3 py-1.5 transition-colors">Cerrar sesión</button>
+        <div class="flex items-center gap-4 shrink-0">
+            <div id="header-fecha" class="text-right text-xs text-slate-400 hidden md:block"></div>
+            <button onclick="cerrarSesion()" class="text-xs whitespace-nowrap text-slate-300 hover:text-white border border-slate-600 hover:border-slate-400 rounded-lg px-3 py-1.5 transition-colors">Cerrar sesión</button>
         </div>
     </div>
 </header>
@@ -214,12 +213,12 @@
 <!-- ═══════════════ TABS ═══════════════ -->
 <nav id="company-nav" class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
     <div class="max-w-7xl mx-auto">
-        <!-- Grid de 4 columnas iguales: siempre visible en cualquier ancho -->
-        <div class="grid grid-cols-4">
+        <!-- Una sola fila: en pantallas angostas se desliza horizontalmente -->
+        <div id="company-tabs" class="flex overflow-x-auto hide-scrollbar">
 
             <!-- 1 · Nuevo Presupuesto -->
             <button data-tab="tab-nuevo" onclick="mostrarTab('tab-nuevo')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-blue-700 text-blue-700">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -233,7 +232,7 @@
 
             <!-- 2 · Enviados -->
             <button data-tab="tab-enviados" onclick="mostrarTab('tab-enviados')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -247,7 +246,7 @@
 
             <!-- 3 · Adjudicados -->
             <button data-tab="tab-adjudicados" onclick="mostrarTab('tab-adjudicados')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -262,7 +261,7 @@
 
             <!-- 4 · Firma Digital -->
             <button data-tab="tab-firma" onclick="mostrarTab('tab-firma')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -276,7 +275,7 @@
 
             <!-- 5 · Órdenes de Trabajo -->
             <button data-tab="tab-ot" onclick="mostrarTab('tab-ot')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -291,7 +290,7 @@
 
             <!-- Ejecución de proyectos -->
             <button id="nav-proyectos" data-tab="tab-proyectos" onclick="mostrarTab('tab-proyectos')"
-                class="hidden tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="hidden tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -305,7 +304,7 @@
 
             <!-- 6 · Mi Empresa -->
             <button data-tab="tab-empresa" onclick="mostrarTab('tab-empresa')"
-                class="tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -314,10 +313,22 @@
                 <span class="text-xs sm:text-sm font-semibold leading-tight">Mi Empresa</span>
             </button>
 
-            <button id="nav-suscripcion" data-tab="tab-suscripcion" onclick="mostrarTab('tab-suscripcion')" class="hidden tab-btn text-sm font-semibold py-3 px-2 border-b-2 border-transparent text-slate-500">Mi suscripción</button>
+            <!-- Mi suscripción -->
+            <button id="nav-suscripcion" data-tab="tab-suscripcion" onclick="mostrarTab('tab-suscripcion')"
+                class="hidden tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
+                       py-3 px-2 text-center border-b-2 transition-all
+                       border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                </svg>
+                <span class="text-xs sm:text-sm font-semibold leading-tight">
+                    <span class="hidden sm:inline">Mi suscripción</span>
+                    <span class="sm:hidden">Suscripción</span>
+                </span>
+            </button>
             <!-- 7 · Empresas (solo superadmin) -->
             <button id="nav-superadmin" data-tab="tab-superadmin" onclick="mostrarTab('tab-superadmin')"
-                class="hidden tab-btn group relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2
+                class="hidden tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
                        py-3 px-2 text-center border-b-2 transition-all
                        border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
                 <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -966,9 +977,9 @@
 </div>
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
-<script src="data.js?v=20261006a"></script>
-<script src="app.js?v=20261006a"></script>
-<script src="platform.js?v=20261006a"></script>
-<script src="proyectos.js?v=20261006a"></script>
+<script src="data.js?v=20261006c"></script>
+<script src="app.js?v=20261006c"></script>
+<script src="platform.js?v=20261006c"></script>
+<script src="proyectos.js?v=20261006c"></script>
 </body>
 </html>

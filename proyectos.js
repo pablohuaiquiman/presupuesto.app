@@ -828,7 +828,7 @@ const Proyectos = (() => {
         const dec = t.decimales ?? decimales(p);
         const nf = dec > 0 ? `#,##0.${'0'.repeat(dec)}` : '#,##0';
         const wb = new ExcelJS.Workbook();
-        wb.creator = emp.nombre_comercial || 'Presupuestos App';
+        wb.creator = emp.nombre_comercial || 'Presupuestos Pro';
         wb.calcProperties.fullCalcOnLoad = true;
         const ws = wb.addWorksheet(`EEPP N°${e.numero}`, { pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } }, views: [{ showGridLines: false }] });
         ws.columns = [7, 16, 14, 14, 7, 10, 13, 15, 10, 9, 15, 15, 15].map(w => ({ width: w }));
