@@ -5,7 +5,7 @@ process.chdir(path.resolve(__dirname,'..'));
 const db=new PGlite();
 const admin='11111111-1111-4111-8111-111111111111', client='22222222-2222-4222-8222-222222222222', member='33333333-3333-4333-8333-333333333333';
 const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-await db.exec("create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth,public to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;");
+await db.exec("create role anon; create role authenticated; create role service_role; create schema auth; create table auth.users(id uuid primary key,email text); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth,public to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;");
 await db.exec('alter default privileges in schema public grant all on tables to authenticated,anon;');
 // Esquema mínimo equivalente al de Supabase Storage.
 await db.exec("create schema storage; create table storage.buckets(id text primary key,name text,public boolean default false,file_size_limit bigint,allowed_mime_types text[]); create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text,owner uuid); create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$; alter table storage.objects enable row level security; grant usage on schema storage to anon,authenticated; grant select,insert,delete on storage.objects to authenticated;");
@@ -161,6 +161,29 @@ await as(jefe);
 assert.equal(await value("select count(*)::int v from public.proyectos"),0);
 await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pid2+"','2026-10-04','generales','Colación',8000)",/row-level security/);
 assert.equal(await value("select count(*)::int v from storage.objects"),0);
+
+// ── Mercado Pago: solo el servidor acredita, sin duplicar ni aceptar montos distintos ──
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610060002_mercadopago.sql','utf8'));
+await db.exec("insert into public.suscripciones(empresa_id,plan_nombre,monto_mensual,inicio,dias_gracia) values('"+e2+"','Mensual',25000,'2026-10-01',5)");
+const cobro=async monto=>value("insert into public.cobros_mp(empresa_id,periodo_inicio,monto) values('"+e2+"','2026-10-01',"+monto+") returning id v");
+const c1=await cobro(25000),c2=await cobro(20000),c3=await cobro(25000),c4=await cobro(25000);
+const acreditar=(c,pago,monto,estado)=>"select public.mp_acreditar_pago('"+c+"','"+pago+"',"+monto+",'2026-10-06','"+estado+"') v";
+await as(otro);
+await rejects(acreditar(c1,'123',25000,'approved'),/permission denied/);
+assert.equal(await value("select count(*)::int v from public.cobros_mp"),4);
+await as(obrero);
+assert.equal(await value("select count(*)::int v from public.cobros_mp"),0);
+await db.exec("reset role; set role service_role;");
+assert.equal(await value(acreditar(c1,'123',25000,'approved')),'aplicado');
+assert.equal(await value(acreditar(c1,'123',25000,'approved')),'aplicado');
+assert.equal(await value(acreditar(c4,'123',25000,'approved')),'duplicado');
+assert.equal(await value(acreditar(c2,'124',20000,'approved')),'revision');
+assert.equal(await value(acreditar(c3,'125',25000,'rejected')),'rechazado');
+await db.exec("reset role");
+assert.equal(await value("select periodos_pagados v from public.suscripciones where empresa_id='"+e2+"'"),1);
+assert.equal(await value("select origen||referencia||(registrado_por is null)::text v from public.pagos_suscripcion where empresa_id='"+e2+"'"),'mercadopagomp-123true');
+assert.equal(await value("select count(*)::int v from public.plataforma_historial where empresa_id='"+e2+"' and actor is null"),2);
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) y proyectos (estados de pago, gastos, archivos, aislamiento) correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});

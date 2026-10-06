@@ -11,7 +11,7 @@ function mock(opts){
    {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
   perfiles:[{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
   presupuestos:opts.presupuestos.map(p=>({id:p.id,empresa_id:a,data:p})),
-  suscripciones:[],pagos_suscripcion:[],plataforma_historial:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[]
+  suscripciones:(opts.suscripciones||[]).map(s=>({empresa_id:a,...s})),pagos_suscripcion:[],plataforma_historial:[],cobros_mp:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[]
  };
  window.fixture={tables,calls:[],uploads:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
  const hoy=()=>new Date().toISOString().slice(0,10);
@@ -42,6 +42,7 @@ function mock(opts){
  }
  window.mockClient={auth:{getSession:async()=>({data:{session:{user:{id:u},access_token:'fixture'}}}),onAuthStateChange(){},signOut:async()=>{}},
   from:query,
+  functions:{invoke:async(name,o)=>{window.fixture.calls.push({name,args:o?.body});return name==='mercadopago'?{data:{url:location.origin+'/?mp=aprobado&payment_id=1&status=approved'},error:null}:{data:null,error:null};}},
   storage:{from:()=>({upload:async(p)=>{window.fixture.uploads.push(p);return{error:null};},createSignedUrl:async()=>({data:{signedUrl:'about:blank'},error:null}),remove:async()=>({error:null})})},
   async rpc(name,args) {
    window.fixture.calls.push({name,args});
@@ -87,7 +88,7 @@ try {
  const chrome=process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
  if(fs.existsSync(chrome)) options.executablePath=chrome;
  browser=await chromium.launch(options);
- async function abrirPagina(presupuestos){
+ async function abrirPagina(presupuestos,suscripciones=[]){
   const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
   page.errores=[];
   page.on('pageerror',e=>page.errores.push(e.message));
@@ -96,7 +97,7 @@ try {
    const u=route.request().url();
    route.fulfill({contentType:'text/javascript',body:u.includes('supabase')?'window.supabase={createClient:()=>window.mockClient};':u.includes('exceljs')?excelJs:''});
   });
-  await page.addInitScript(mock,{presupuestos});
+  await page.addInitScript(mock,{presupuestos,suscripciones});
   await page.goto(url,{waitUntil:'networkidle'});
   return page;
  }
@@ -210,6 +211,17 @@ try {
  await pp.screenshot({path:'tests/artifacts/proyecto-mobile.png',fullPage:true,animations:"disabled"});
  assert.equal(await pp.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Desbordamiento horizontal en móvil (proyectos)');
  assert.deepEqual(pp.errores,[]);
- console.log('Navegador: plataforma y ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos) correctos en escritorio y móvil. Sin errores JS.');
+ await pp.close();
+
+ // ── Pago de mensualidad con Mercado Pago ──
+ const pm=await abrirPagina([],[{plan_nombre:'Mensual',monto_mensual:25000,inicio:'2026-10-01',dias_gracia:5,periodos_pagados:0,cancelada:false}]);
+ await pm.locator('#pl-mode-empresa').click();
+ await pm.locator('#nav-suscripcion').click();
+ await pm.getByText(/Próxima mensualidad: \$\s?25\.000/).waitFor();
+ await Promise.all([pm.waitForURL(/mp=aprobado/),pm.getByRole('button',{name:'Pagar con Mercado Pago'}).click()]);
+ await pm.getByText('Pago recibido',{exact:false}).waitFor();
+ await pm.waitForFunction(()=>location.search==='' && !document.getElementById('tab-suscripcion').classList.contains('hidden'));
+ assert.deepEqual(pm.errores,[]);
+ console.log('Navegador: plataforma, ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos) y pago con Mercado Pago correctos en escritorio y móvil. Sin errores JS.');
 } finally { if(browser)await browser.close(); await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

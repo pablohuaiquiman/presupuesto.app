@@ -40,6 +40,9 @@
 .pl-footnote { padding:12px 20px; margin:0; line-height:1.6; }
 .pl-notice { padding:24px; background:#fff7ed; border:1px solid #fed7aa; border-radius:12px; color:#9a3412; }
 .pl-notice p { margin-top:12px; }
+.pl-pay { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin:16px 0; padding:16px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; }
+.pl-pay small { display:block; margin-top:4px; color:#475569; }
+.pl-pay .pl-button { flex-shrink:0; }
 #pl-banner { max-width:1250px; width:calc(100% - 24px); margin:16px auto 0; padding:14px; background:#fff7ed; color:#9a3412; border-radius:10px; font-size:14px; }
 .pl-dialog { width:min(840px,calc(100vw - 24px)); max-height:90vh; border:0; border-radius:18px; padding:28px; box-shadow:0 24px 80px #0f172a40; }
 .pl-dialog::backdrop { background:#0f172a99; }

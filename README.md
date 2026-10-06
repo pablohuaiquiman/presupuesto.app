@@ -67,6 +67,21 @@ La restricción no elimina documentos. Una empresa sin acceso conserva la pantal
 
 El historial registra el usuario administrador, fecha y cambio. Las empresas con actividad se dan de baja mediante **Archivar**. La eliminación de empresas vacías requiere escribir el nombre exacto y conserva una entrada de auditoría con su identidad.
 
+## Pago de mensualidades con Mercado Pago
+
+En **Mi suscripción**, el administrador de una empresa autorizada con plan vigente ve **Pagar con Mercado Pago** (Checkout Pro). Paga la siguiente mensualidad pendiente con tarjeta o saldo de Mercado Pago y vuelve a la app.
+
+- La Edge Function `mercadopago` crea el link de pago y recibe la notificación. Antes de acreditar consulta el pago directamente en la API de Mercado Pago, así que una notificación falsa no acredita nada.
+- `mp_acreditar_pago` (solo ejecutable por el servidor) registra el pago con origen "mercadopago" y referencia `mp-<id>`, y extiende un período. Es idempotente por id de pago.
+- Si el pago aprobado no coincide con la suscripción vigente (precio cambiado, cancelada), queda **en revisión** en la ficha de la empresa para registrarlo a mano.
+- Un pago en línea no levanta suspensiones ni bloqueos administrativos. Las transferencias se siguen registrando manualmente.
+
+Activación (una vez):
+
+1. Aplicar **supabase/migrations/202610060002_mercadopago.sql**.
+2. Desplegar la función sin verificación JWT (la valida internamente): `supabase functions deploy mercadopago --no-verify-jwt`.
+3. Configurar los secretos de la función: `MP_ACCESS_TOKEN` (Access Token de Mercado Pago; primero el de prueba, luego el de producción), opcional `MP_WEBHOOK_SECRET` (clave secreta de Webhooks para validar la firma) y `APP_URL` (por defecto el sitio de GitHub Pages).
+
 ## Ejecución de proyectos
 
 Un presupuesto adjudicado pasa a ejecución desde **Adjudicados** u **Órdenes de Trabajo** ("Pasar a ejecución"). Eso abre un centro de costo en la pestaña **Proyectos** con:

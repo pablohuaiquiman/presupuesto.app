@@ -92,6 +92,7 @@ const Plataforma = (() => {
         cambiarModo(miPerfil?.es_superadmin ? 'admin' : 'empresa');
         clearInterval(timer);
         if (disponible) timer=setInterval(() => actualizarAcceso().catch(() => {}),60000);
+        if (disponible) retornoMercadoPago();
     }
     async function actualizarAcceso() {
         try {
@@ -165,7 +166,44 @@ const Plataforma = (() => {
     function tablaPagos(rows) {
         if (!rows.length) return '<p class="pl-empty">Todavía no hay pagos registrados.</p>';
         return '<div class="pl-table-wrap"><table class="pl-table"><thead><tr><th>Pago</th><th>Período cubierto</th><th>Monto</th><th>Referencia</th></tr></thead><tbody>'+
-            rows.map(p => '<tr><td>'+fecha(p.fecha_pago)+'</td><td>'+fecha(p.periodo_inicio)+' → '+fecha(p.periodo_fin)+'<small>Fin exclusivo</small></td><td>'+clp(p.monto)+'</td><td>'+h(p.referencia)+'</td></tr>').join('')+'</tbody></table></div>';
+            rows.map(p => '<tr><td>'+fecha(p.fecha_pago)+'</td><td>'+fecha(p.periodo_inicio)+' → '+fecha(p.periodo_fin)+'<small>Fin exclusivo</small></td><td>'+clp(p.monto)+'</td><td>'+h(p.referencia)+(p.origen==='mercadopago' ? '<small>Mercado Pago</small>' : '')+'</td></tr>').join('')+'</tbody></table></div>';
+    }
+    const ESTADOS_MP = {creado:'Iniciado',pendiente:'Pendiente',aplicado:'Acreditado',rechazado:'Rechazado',revision:'Requiere revisión'};
+    function tablaCobrosMp(rows) {
+        if (!rows.length) return '<p class="pl-empty">Sin cobros en línea.</p>';
+        return '<div class="pl-table-wrap"><table class="pl-table"><thead><tr><th>Iniciado</th><th>Período</th><th>Monto</th><th>Estado</th><th>Pago MP</th></tr></thead><tbody>'+
+            rows.map(c => '<tr><td>'+fecha(c.creado_en)+'</td><td>'+fecha(c.periodo_inicio)+'</td><td>'+clp(c.monto)+'</td><td>'+h(ESTADOS_MP[c.estado] || c.estado)+'</td><td>'+h(c.mp_payment_id || '—')+'</td></tr>').join('')+'</tbody></table></div>';
+    }
+    async function pagarMercadoPago(button) {
+        if (button.dataset.busy) return;
+        button.dataset.busy = 'true';
+        button.disabled = true;
+        button.textContent = 'Conectando con Mercado Pago…';
+        try {
+            const {data,error} = await supa.functions.invoke('mercadopago',{body:{accion:'crear'}});
+            if (error || data?.error || !data?.url) throw new Error(data?.error || error?.message || 'No se pudo iniciar el pago');
+            location.href = data.url;
+        } catch(error) {
+            toast(error.message,'error');
+            delete button.dataset.busy;
+            button.disabled = false;
+            button.textContent = 'Pagar con Mercado Pago';
+        }
+    }
+    // Al volver de Mercado Pago, el webhook puede tardar unos segundos en acreditar el pago.
+    function retornoMercadoPago() {
+        const params = new URLSearchParams(location.search);
+        const estado = params.get('mp');
+        if (!estado) return;
+        params.delete('mp');
+        ['collection_id','collection_status','payment_id','status','external_reference','payment_type','merchant_order_id','preference_id','site_id','processing_mode','merchant_account_id'].forEach(k => params.delete(k));
+        history.replaceState(null,'',location.pathname+(params.toString() ? '?'+params : '')+location.hash);
+        const mensajes = {aprobado:['Pago recibido. Lo estamos acreditando en tu suscripción…','success'],pendiente:['Tu pago quedó pendiente de confirmación en Mercado Pago.','info'],rechazado:['El pago no se completó. Puedes intentarlo nuevamente.','error']};
+        const [texto,tipo] = mensajes[estado] || mensajes.pendiente;
+        toast(texto,tipo);
+        cambiarModo('empresa');
+        mostrarTab('tab-suscripcion');
+        if (estado !== 'rechazado') [4000,10000,20000].forEach(ms => setTimeout(() => { if (!$('tab-suscripcion').classList.contains('hidden')) cargarMiSuscripcion(); }, ms));
     }
     async function abrirFicha(id) {
         const token=++consulta;
@@ -174,13 +212,16 @@ const Plataforma = (() => {
         $('pl-detail').innerHTML='<p class="pl-empty">Cargando ficha…</p>';
         if (!dialog.open) dialog.showModal();
         try {
-            const [er,sr,pr,hr] = await Promise.all([
+            const [er,sr,pr,hr,cr] = await Promise.all([
                 supa.from('empresas').select('id,nombre_comercial,rut,email_contacto,telefono,estado_acceso,acceso_transitorio,limite_usuarios').eq('id',id).single(),
                 supa.from('suscripciones').select('*').eq('empresa_id',id).maybeSingle(),
                 supa.from('pagos_suscripcion').select('*').eq('empresa_id',id).order('registrado_en',{ascending:false}).limit(100),
-                supa.from('plataforma_historial').select('*').eq('empresa_id',id).order('creado_en',{ascending:false}).limit(50)
+                supa.from('plataforma_historial').select('*').eq('empresa_id',id).order('creado_en',{ascending:false}).limit(50),
+                supa.from('cobros_mp').select('*').eq('empresa_id',id).order('creado_en',{ascending:false}).limit(20)
             ]);
             for (const r of [er,sr,pr,hr]) if (r.error) throw r.error;
+            const cobros=cr.error ? [] : cr.data;
+            const revision=cobros.filter(c => c.estado==='revision').length;
             if (token!==consulta || !dialog.open) return;
             const e=er.data,s=sr.data,r=resumen(e,s),estadoOpciones=estados(e.estado_acceso);
             const pagoId=crypto.randomUUID();
@@ -207,7 +248,8 @@ const Plataforma = (() => {
                 '<label class="pl-check"><input id="pl-cancelled" type="checkbox"'+(s?.cancelada ? ' checked' : '')+'> Cancelar renovación (conserva el tiempo pagado)</label><button class="pl-button pl-primary" type="submit">Guardar suscripción</button></form></section>'+
                 '<section class="pl-section"><h3>Registrar mensualidad</h3>'+pagoForm+'</section>'+
                 '<section class="pl-section"><h3>Últimos 100 pagos</h3>'+tablaPagos(pr.data)+'</section>'+
-                '<section class="pl-section"><h3>Últimos 50 movimientos administrativos</h3><ul class="pl-history">'+hr.data.map(x => '<li><strong>'+h(x.accion)+'</strong> · '+fecha(x.creado_en)+'<small>'+h(JSON.stringify(x.detalle))+'</small><small>Administrador: '+h(x.actor)+'</small></li>').join('')+'</ul></section>'+eliminar;
+                '<section class="pl-section"><h3>Cobros con Mercado Pago</h3>'+(revision ? '<p class="pl-notice" role="alert">'+revision+' pago(s) aprobados en Mercado Pago no coinciden con la suscripción vigente. Verifícalos y regístralos manualmente si corresponde.</p>' : '')+tablaCobrosMp(cobros)+'</section>'+
+                '<section class="pl-section"><h3>Últimos 50 movimientos administrativos</h3><ul class="pl-history">'+hr.data.map(x => '<li><strong>'+h(x.accion)+'</strong> · '+fecha(x.creado_en)+'<small>'+h(JSON.stringify(x.detalle))+'</small><small>'+(x.actor ? 'Administrador: '+h(x.actor) : 'Automático (Mercado Pago)')+'</small></li>').join('')+'</ul></section>'+eliminar;
             $('pl-delete-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_eliminar_empresa',{p_empresa_id:id,p_nombre:$('pl-delete-name').value},true));
             $('pl-access-form').addEventListener('submit',event => accionFormulario(event,'plataforma_cambiar_acceso',{p_empresa_id:id,p_estado:$('pl-access').value,p_motivo:$('pl-reason').value},true));
             $('pl-quota-form').addEventListener('submit',event => accionFormulario(event,'set_limite_usuarios',{p_empresa_id:id,p_limite:Number($('pl-quota').value)}));
@@ -251,7 +293,10 @@ const Plataforma = (() => {
                 ]);
                 if (sr.error || pr.error) throw sr.error || pr.error;
                 const s=sr.data;
-                detalle=s ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>'+clp(s.monto_mensual)+'</strong><span>Mensualidad</span></div><div class="pl-stat"><strong>'+fecha(acceso.vencimiento)+'</strong><span>Fin del tiempo pagado / próximo vencimiento</span></div></div><p class="pl-footnote">Plazo de gracia: '+s.dias_gracia+' días. Los pagos se verifican y registran manualmente por la administración de la plataforma. Comunícate por el canal con el que contrataste el servicio.</p><h3>Historial de pagos</h3>'+tablaPagos(pr.data) :
+                const pagoEnLinea=s && !s.cancelada && acceso.estado_acceso==='autorizada' && miPerfil.rol==='admin'
+                    ? '<div class="pl-pay"><div><strong>Próxima mensualidad: '+clp(s.monto_mensual)+'</strong><small>Período '+fecha(fechaCiclo(s.inicio,s.periodos_pagados))+' → '+fecha(fechaCiclo(s.inicio,s.periodos_pagados+1))+' · tarjeta de crédito, débito o saldo Mercado Pago. Se acredita automáticamente al aprobarse.</small></div><button class="pl-button pl-primary" data-action="mp-pagar">Pagar con Mercado Pago</button></div>'
+                    : '';
+                detalle=s ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>'+clp(s.monto_mensual)+'</strong><span>Mensualidad</span></div><div class="pl-stat"><strong>'+fecha(acceso.vencimiento)+'</strong><span>Fin del tiempo pagado / próximo vencimiento</span></div></div>'+pagoEnLinea+'<p class="pl-footnote">Plazo de gracia: '+s.dias_gracia+' días. También puedes pagar por transferencia; esos pagos los registra la administración de la plataforma.</p><h3>Historial de pagos</h3>'+tablaPagos(pr.data) :
                     (empresaActual.acceso_transitorio ? '<p>Tu empresa está en transición y aún no tiene un plan asignado. No se aplican vencimientos hasta configurar la suscripción.</p>' : '<p>Tu empresa necesita un plan asignado para comenzar a operar. Contacta con la administración de la plataforma.</p>');
             }
             root.innerHTML='<div class="pl-heading"><div><p class="pl-eyebrow">MI EMPRESA</p><h2>Mi suscripción</h2><p>'+h(empresaActual.nombre_comercial)+'</p></div><button class="pl-button" data-action="subscription-refresh">Actualizar estado</button></div><div class="pl-card pl-padding"><div class="pl-status-line">'+badge(acceso.estado_acceso)+badge(estado)+'</div><p>'+(puedeOperar() ? 'Tu empresa tiene acceso operativo.' : 'Tu empresa no tiene acceso operativo. Revisa el estado de acceso y de suscripción con la administración.')+'</p>'+detalle+'</div>';
@@ -268,6 +313,7 @@ const Plataforma = (() => {
         if (action==='refresh') cargarAdmin();
         if (action==='detail') abrirFicha(button.dataset.id);
         if (action==='subscription-refresh') cargarMiSuscripcion();
+        if (action==='mp-pagar') pagarMercadoPago(button);
     });
     return {resolverSesion,iniciar,puedeOperar,navegarPermitido,cambiarModo,cargarAdmin,cargarMiSuscripcion,
         get disponible(){return disponible;},
