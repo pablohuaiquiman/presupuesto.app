@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 process.chdir(path.resolve(__dirname,'..'));
 const html=fs.readFileSync('index.html','utf8');
 for (const m of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new Function(m[1]);
-for (const file of ['app.js','data.js','platform.js']) new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});
+for (const file of ['app.js','data.js','platform.js','proyectos.js']) new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 assert.equal(new Set(ids).size,ids.length,'IDs HTML duplicados');
 const context=vm.createContext({document:{addEventListener(){}},Intl,Date,console});

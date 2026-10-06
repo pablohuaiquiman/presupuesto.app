@@ -67,11 +67,33 @@ La restricción no elimina documentos. Una empresa sin acceso conserva la pantal
 
 El historial registra el usuario administrador, fecha y cambio. Las empresas con actividad se dan de baja mediante **Archivar**. La eliminación de empresas vacías requiere escribir el nombre exacto y conserva una entrada de auditoría con su identidad.
 
+## Ejecución de proyectos
+
+Un presupuesto adjudicado pasa a ejecución desde **Adjudicados** u **Órdenes de Trabajo** ("Pasar a ejecución"). Eso abre un centro de costo en la pestaña **Proyectos** con:
+
+- **Resumen**: contrato neto, avance cobrado, cobrado, por cobrar, anticipo amortizado, retenciones, gastos aprobados y margen real.
+- **Presupuesto y OT**: vista de solo lectura y PDF.
+- **Estados de pago**: el avance acumulado se ingresa por partida en unidades o en %. El anterior se toma automáticamente del EP previo. Resumen como la planilla EE.PP.: costo directo, GG y utilidad (si el presupuesto los usa), subtotal neto, descuento de anticipo, retención, total neto, IVA o retención de boleta y monto a pagar. Exporta a Excel (con fórmulas) y PDF.
+- **Gastos**: materiales, mano de obra y gastos generales (petróleo, colaciones, etc.) con respaldo en foto o PDF.
+- **Configuración**: administrador del proyecto, anticipo, retención %, documento tributario, OC, firmantes y valor UF de referencia.
+
+Reglas:
+
+- Solo hay un EP abierto (borrador o presentado) a la vez. Flujo: borrador → presentado → aprobado (factura, fecha estimada de pago) → pagado (fecha real y comprobante). Al presentarlo, los montos quedan congelados.
+- El anticipo se descuenta en proporción al avance; el EP que llega al 100 % descuenta el saldo exacto. Con el 100 % se puede solicitar la devolución de las retenciones.
+- Un EP aprobado con fecha estimada vencida muestra los días de atraso y suma en el contador de la pestaña Proyectos.
+- Cualquier miembro registra gastos; quedan pendientes hasta que los aprueba o rechaza (con motivo) el administrador designado del proyecto o el administrador de la empresa. Solo los aprobados cuentan en el control de costos.
+- Los respaldos se guardan en el bucket privado `proyectos` de Supabase Storage (máx. 5 MB; las fotos se comprimen a 1600 px). Se abren con enlaces temporales.
+
+Para activarlo en una base que ya tiene la plataforma: respaldo, ejecutar una vez **supabase/migrations/202610060001_proyectos.sql** y publicar los archivos (incluye proyectos.js). Mientras la migración no exista, la pestaña Proyectos queda oculta.
+
 ## Archivos
 
 - platform.js: panel, ficha, vista de suscripción, estados y actualización de sesión.
 - platform.css: estilos adaptados a escritorio y móvil.
+- proyectos.js: ejecución de proyectos, cálculo de estados de pago, gastos, archivos y exportación Excel/PDF.
 - supabase/migrations/202610050001_plataforma.sql: tablas, funciones, auditoría y permisos.
+- supabase/migrations/202610060001_proyectos.sql: proyectos, estados de pago, gastos, reglas de estado y bucket de respaldos.
 - tests/: pruebas de fechas/HTML, PostgreSQL temporal y navegador con datos simulados.
 
 ## Pruebas

@@ -1,6 +1,76 @@
 const {chromium}=require('playwright');
+const ExcelJS=require('exceljs');
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path'),assert=require('node:assert/strict');
 process.chdir(path.resolve(__dirname,'..'));
+
+// Supabase simulado: tablas en memoria, RPC de plataforma y Storage.
+function mock(opts){
+ const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',u='11111111-1111-4111-8111-111111111111';
+ const tables={
+  empresas:[{id:a,nombre_comercial:'Constructora PHH',razon_social:'CONSTRUCTORA E INSTALACIONES PHH SPA',rut:'77234145-8',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:3,perfiles:[{count:1}]},
+   {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
+  perfiles:[{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
+  presupuestos:opts.presupuestos.map(p=>({id:p.id,empresa_id:a,data:p})),
+  suscripciones:[],pagos_suscripcion:[],plataforma_historial:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[]
+ };
+ window.fixture={tables,calls:[],uploads:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
+ const hoy=()=>new Date().toISOString().slice(0,10);
+ function alta(table,r){
+  const base={id:crypto.randomUUID(),creado_en:new Date().toISOString(),...r};
+  if(table==='proyecto_edps')Object.assign(base,{numero:tables.proyecto_edps.filter(e=>e.proyecto_id===r.proyecto_id).length+1,estado:'borrador'});
+  if(table==='proyecto_gastos')Object.assign(base,{estado:'pendiente',registrado_por:u});
+  if(table==='proyectos')base.estado='activo';
+  return base;
+ }
+ function query(table) {
+  let filters=[],single=false,range=null,limit=null,mutation=null,nuevos=null,borrar=false;
+  const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},order(){return q;},range(a,b){range=[a,b];return q;},limit(n){limit=n;return q;},single(){single=true;return q;},maybeSingle(){single=true;return q;},
+   update(v){mutation=v;return q;},upsert(){return q;},insert(v){nuevos=(Array.isArray(v)?v:[v]).map(r=>alta(table,r));return q;},delete(){borrar=true;return q;},
+   then(resolve,reject){
+    let rows;
+    if(nuevos){tables[table].push(...nuevos);rows=nuevos;}
+    else{
+     rows=tables[table].filter(r=>filters.every(([k,v])=>r[k]===v));
+     if(mutation)rows.forEach(r=>{Object.assign(r,mutation);if(table==='proyecto_edps'&&r.estado==='presentado'&&!r.fecha_presentacion)r.fecha_presentacion=hoy();});
+     if(borrar)tables[table]=tables[table].filter(r=>!rows.includes(r));
+    }
+    if(range)rows=rows.slice(range[0],range[1]+1);
+    if(limit)rows=rows.slice(0,limit);
+    return Promise.resolve({data:structuredClone(single?rows[0]||null:rows),error:null}).then(resolve,reject);
+   }};
+  return q;
+ }
+ window.mockClient={auth:{getSession:async()=>({data:{session:{user:{id:u},access_token:'fixture'}}}),onAuthStateChange(){},signOut:async()=>{}},
+  from:query,
+  storage:{from:()=>({upload:async(p)=>{window.fixture.uploads.push(p);return{error:null};},createSignedUrl:async()=>({data:{signedUrl:'about:blank'},error:null}),remove:async()=>({error:null})})},
+  async rpc(name,args) {
+   window.fixture.calls.push({name,args});
+   if(name==='estado_servicio')return {data:structuredClone(window.fixture.state),error:null};
+   if(name==='plataforma_configurar_suscripcion'){
+    let s=tables.suscripciones.find(s=>s.empresa_id===args.p_empresa_id);
+    if(!s){s={empresa_id:args.p_empresa_id,periodos_pagados:0};tables.suscripciones.push(s);}
+    Object.assign(s,{inicio:args.p_inicio,plan_nombre:args.p_plan,monto_mensual:args.p_monto,dias_gracia:args.p_gracia,cancelada:args.p_cancelada});
+   }
+   if(name==='plataforma_cambiar_acceso'){
+    const e=tables.empresas.find(e=>e.id===args.p_empresa_id);
+    e.estado_acceso=args.p_estado;e.aprobada=args.p_estado==='autorizada';
+   }
+   if(name==='plataforma_registrar_pago'){
+    const s=tables.suscripciones.find(s=>s.empresa_id===args.p_empresa_id);
+    s.periodos_pagados++;
+    tables.pagos_suscripcion.push({id:args.p_id,empresa_id:args.p_empresa_id,periodo_inicio:args.p_periodo_inicio,periodo_fin:args.p_periodo_inicio,monto:args.p_monto,referencia:args.p_referencia,fecha_pago:args.p_fecha_pago});
+   }
+   return {data:null,error:null};
+  }};
+}
+
+const presupuesto={id:'pre-1',numero:'PRE-101',fecha:'2026-09-01',estado:'adjudicado',fechaAdjudicacion:'2026-09-10',moneda:'CLP',decimales:0,usarGGUtil:false,ggPct:0,utilPct:0,firma:null,
+ cliente:{nombre:'Inmobiliaria Las Dalias',rut:'',telefono:'',direccion:'Las Dalias 225',region:'Libertador Bernardo O’Higgins',comuna:'Requínoa'},
+ capitulos:[{id:'c1',numero:'1.0',nombre:'Remates de yeso',items:[
+  {id:'a',numero:'1.1',codigo:'',descripcion:'DPTO TIPO A',unidad:'DPTO',cantidad:8,precioUnit:422500,total:3380000},
+  {id:'b',numero:'1.2',codigo:'',descripcion:'DPTO TIPO B',unidad:'DPTO',cantidad:8,precioUnit:455000,total:3640000}]}],
+ ordenesTrabajo:[{id:'ot1',numero:'OT-101-01',fecha:'2026-09-11',estado:'firmada',firma:null}]};
+
 (async()=>{
 const root=process.cwd();
 const server=http.createServer((req,res)=>{
@@ -9,59 +79,31 @@ const server=http.createServer((req,res)=>{
  fs.readFile(file,(error,data)=>{if(error){res.writeHead(404).end();return;}res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(data);});
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const url='http://127.0.0.1:'+server.address().port;
+const excelJs=fs.readFileSync(require.resolve('exceljs/dist/exceljs.min.js'),'utf8');
 let browser;
 try {
  const options={headless:true};
  const chrome=process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
  if(fs.existsSync(chrome)) options.executablePath=chrome;
  browser=await chromium.launch(options);
- const page=await browser.newPage({viewport:{width:1440,height:1000}});
- const errors=[];
- page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/cdn.jsdelivr.net/**',route=>route.fulfill({contentType:'text/javascript',body:route.request().url().includes('supabase')?'window.supabase={createClient:()=>window.mockClient};':''}));
- await page.addInitScript(()=>{
-  const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',u='11111111-1111-4111-8111-111111111111';
-  const tables={
-   empresas:[{id:a,nombre_comercial:'Constructora PHH',rut:'77234145-8',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:3,perfiles:[{count:1}]},
-    {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
-   perfiles:[{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
-   presupuestos:[],suscripciones:[],pagos_suscripcion:[],plataforma_historial:[]
-  };
-  window.fixture={tables,calls:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
-  function query(table) {
-   let filters=[],single=false,range=null,limit=null,mutation=null;
-   const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},order(){return q;},range(a,b){range=[a,b];return q;},limit(n){limit=n;return q;},single(){single=true;return q;},maybeSingle(){single=true;return q;},update(v){mutation=v;return q;},upsert(){return q;},then(resolve,reject){
-    let rows=tables[table].filter(r=>filters.every(([k,v])=>r[k]===v));
-    if(mutation)rows.forEach(r=>Object.assign(r,mutation));
-    if(range)rows=rows.slice(range[0],range[1]+1);
-    if(limit)rows=rows.slice(0,limit);
-    return Promise.resolve({data:structuredClone(single?rows[0]||null:rows),error:null}).then(resolve,reject);
-   }};
-   return q;
-  }
-  window.mockClient={auth:{getSession:async()=>({data:{session:{user:{id:u},access_token:'fixture'}}}),onAuthStateChange(){},signOut:async()=>{}},
-   from:query,async rpc(name,args) {
-    window.fixture.calls.push({name,args});
-    if(name==='estado_servicio')return {data:structuredClone(window.fixture.state),error:null};
-    if(name==='plataforma_configurar_suscripcion'){
-     let s=tables.suscripciones.find(s=>s.empresa_id===args.p_empresa_id);
-     if(!s){s={empresa_id:args.p_empresa_id,periodos_pagados:0};tables.suscripciones.push(s);}
-     Object.assign(s,{inicio:args.p_inicio,plan_nombre:args.p_plan,monto_mensual:args.p_monto,dias_gracia:args.p_gracia,cancelada:args.p_cancelada});
-    }
-    if(name==='plataforma_cambiar_acceso'){
-     const e=tables.empresas.find(e=>e.id===args.p_empresa_id);
-     e.estado_acceso=args.p_estado;e.aprobada=args.p_estado==='autorizada';
-    }
-    if(name==='plataforma_registrar_pago'){
-     const s=tables.suscripciones.find(s=>s.empresa_id===args.p_empresa_id);
-     s.periodos_pagados++;
-     tables.pagos_suscripcion.push({id:args.p_id,empresa_id:args.p_empresa_id,periodo_inicio:args.p_periodo_inicio,periodo_fin:args.p_periodo_inicio,monto:args.p_monto,referencia:args.p_referencia,fecha_pago:args.p_fecha_pago});
-    }
-    return {data:null,error:null};
-   }};
- });
- const url='http://127.0.0.1:'+server.address().port;
- await page.goto(url,{waitUntil:'networkidle'});
+ async function abrirPagina(presupuestos){
+  const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
+  page.errores=[];
+  page.on('pageerror',e=>page.errores.push(e.message));
+  page.on('dialog',dialog=>dialog.accept());
+  await page.route('**/cdn.jsdelivr.net/**',route=>{
+   const u=route.request().url();
+   route.fulfill({contentType:'text/javascript',body:u.includes('supabase')?'window.supabase={createClient:()=>window.mockClient};':u.includes('exceljs')?excelJs:''});
+  });
+  await page.addInitScript(mock,{presupuestos});
+  await page.goto(url,{waitUntil:'networkidle'});
+  return page;
+ }
+ fs.mkdirSync('tests/artifacts',{recursive:true});
+
+ // ── Plataforma ──
+ const page=await abrirPagina([]);
  await page.locator('#pl-companies tr').first().waitFor();
  assert.equal(await page.locator('#pl-companies tr').count(),2);
  assert.equal(await page.locator('#company-nav').isVisible(),false);
@@ -70,7 +112,6 @@ try {
  await page.locator('[data-action="detail"]').click();
  await page.locator('#pl-plan').waitFor();
  await page.locator('#pl-price').fill('20000');
- page.on('dialog',dialog=>dialog.accept());
  await page.locator('#pl-subscription-form button').click();
  await page.locator('#pl-payment-form').waitFor();
  await page.locator('#pl-reference').fill('BANCO-001');
@@ -89,19 +130,86 @@ try {
  await page.evaluate(()=>{window.fixture.state={estado_acceso:'suspendida',estado_pago:'vencida',operativo:false};});
  await page.locator('[data-action="subscription-refresh"]').click();
  await page.waitForFunction(()=>document.querySelector('[data-tab="tab-nuevo"]').disabled);
+ assert.equal(await page.locator('[data-tab="tab-proyectos"]').isDisabled(),true);
  await page.locator('#pl-mode-admin').click();
  await page.locator('#pl-companies').waitFor();
- fs.mkdirSync('tests/artifacts',{recursive:true});
  await page.waitForFunction(()=>getComputedStyle(document.getElementById('tab-superadmin')).opacity==='1');
  await page.evaluate(()=>{document.getElementById('toast').style.display='none';});
  await page.screenshot({path:'tests/artifacts/platform-desktop.png',fullPage:true,animations:"disabled"});
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:'tests/artifacts/platform-mobile.png',fullPage:true,animations:"disabled"});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Desbordamiento horizontal en móvil');
- // Permiso de navegación para usuarios normales, usando la misma sesión simulada.
  await page.evaluate(()=>{miPerfil.es_superadmin=false;Plataforma.cambiarModo('empresa');});
  assert.equal(await page.evaluate(()=>Plataforma.navegarPermitido('tab-superadmin')),false);
- assert.deepEqual(errors,[]);
- console.log('Navegador: administración, filtros, ficha, suscripción, pago, bloqueo, vista empresa y móvil correctos. Sin errores JS.');
+ assert.deepEqual(page.errores,[]);
+ await page.close();
+
+ // ── Ejecución de proyecto ──
+ const pp=await abrirPagina([presupuesto]);
+ await pp.locator('#pl-mode-empresa').click();
+ await pp.locator('[data-tab="tab-adjudicados"]').click();
+ await pp.getByRole('button',{name:'Pasar a ejecución (centro de costo)'}).click();
+ await pp.getByText('Gastos vs costo directo presupuestado').waitFor();
+ assert.equal(await pp.evaluate(()=>window.fixture.tables.proyectos.length),1);
+ await pp.getByRole('button',{name:'Estados de pago',exact:true}).click();
+ await pp.getByRole('button',{name:'+ Nuevo estado de pago'}).click();
+ await pp.locator('input[data-item="a"][data-modo="cant"]').fill('2');
+ await pp.locator('input[data-item="b"][data-modo="pct"]').fill('25');
+ await pp.locator('#pr-edp-resumen').getByText('$ 1.984.028').waitFor();
+ assert.equal(await pp.locator('input[data-item="b"][data-modo="cant"]').inputValue(),'2');
+ await pp.locator('#pr-edp-oc').fill('OC-5521');
+ await pp.getByRole('button',{name:'Presentar al mandante'}).click();
+ await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0]?.estado==='presentado');
+ const ep=await pp.evaluate(()=>window.fixture.tables.proyecto_edps[0]);
+ assert.equal(ep.totales.aPagar,1984028);
+ assert.equal(ep.oc_numero,'OC-5521');
+ await pp.getByRole('button',{name:'Aprobado por el mandante'}).click();
+ await pp.locator('#pr-fac-numero').waitFor();
+ await pp.locator('#pr-fac-numero').fill('F-1234');
+ const atrasada=new Date(Date.now()-10*864e5).toISOString().slice(0,10);
+ await pp.locator('#pr-fac-estimada').fill(atrasada);
+ await pp.getByRole('button',{name:'Guardar facturación'}).click();
+ await pp.getByText(/días de atraso/).first().waitFor();
+ assert.equal(await pp.locator('#badge-proyectos').textContent(),'1');
+ const [descarga]=await Promise.all([pp.waitForEvent('download'),pp.getByRole('button',{name:'Excel',exact:true}).click()]);
+ const xlsx='tests/artifacts/estado-de-pago.xlsx';
+ await descarga.saveAs(xlsx);
+ const wb=new ExcelJS.Workbook(); await wb.xlsx.readFile(xlsx);
+ const ws=wb.worksheets[0];
+ assert.equal(ws.name,'EEPP N°1');
+ assert.equal(ws.getCell('M2').value,'01');
+ const celdas=[];ws.eachRow(r=>r.eachCell(c=>celdas.push(c)));
+ const aPagar=celdas.find(c=>c.value==='A Pagar $');
+ assert.equal(ws.getCell('M'+aPagar.row).value.result,1984028);
+ assert.ok(celdas.some(c=>c.value?.formula?.startsWith('IF(AND(F')),'Faltan fórmulas de avance');
+ assert.ok(celdas.some(c=>c.value==='F-1234'),'Falta la factura en el historial');
+ await pp.locator('#pr-pago-fecha').fill(new Date().toISOString().slice(0,10));
+ await pp.getByRole('button',{name:'Marcar como pagado'}).click();
+ await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0].estado==='pagado');
+ assert.equal(await pp.locator('#badge-proyectos').isHidden(),true);
+ await pp.getByRole('button',{name:'Gastos',exact:true}).click();
+ await pp.locator('#pr-g-cat').selectOption('generales');
+ await pp.locator('#pr-g-sub').fill('Petróleo');
+ await pp.locator('#pr-g-monto').fill('45.000');
+ await pp.locator('#pr-g-desc').fill('Petróleo camioneta');
+ await pp.locator('#pr-g-archivo').setInputFiles({name:'boleta.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 prueba')});
+ await pp.getByRole('button',{name:'Registrar gasto'}).click();
+ await pp.getByText('Petróleo camioneta').waitFor();
+ const gasto=await pp.evaluate(()=>window.fixture.tables.proyecto_gastos[0]);
+ assert.equal(gasto.monto,45000);
+ assert.match(gasto.adjunto_path,/^aaaaaaaa-.*\/gasto\/.*\.pdf$/);
+ await pp.getByRole('button',{name:'Aprobar',exact:true}).click();
+ await pp.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].estado==='aprobado');
+ await pp.getByRole('button',{name:'Resumen',exact:true}).click();
+ await pp.getByText('$ 45.000').first().waitFor();
+ await pp.evaluate(()=>{document.getElementById('toast').style.display='none';});
+ await pp.screenshot({path:'tests/artifacts/proyecto-desktop.png',fullPage:true,animations:"disabled"});
+ await pp.getByRole('button',{name:'Estados de pago',exact:true}).click();
+ await pp.locator('tbody tr').first().click();
+ await pp.setViewportSize({width:390,height:844});
+ await pp.screenshot({path:'tests/artifacts/proyecto-mobile.png',fullPage:true,animations:"disabled"});
+ assert.equal(await pp.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Desbordamiento horizontal en móvil (proyectos)');
+ assert.deepEqual(pp.errores,[]);
+ console.log('Navegador: plataforma y ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos) correctos en escritorio y móvil. Sin errores JS.');
 } finally { if(browser)await browser.close(); await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

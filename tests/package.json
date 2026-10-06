@@ -2,10 +2,11 @@
   "name": "presupuestos-platform-tests",
   "private": true,
   "scripts": {
-    "test": "node platform.test.cjs && node database.test.cjs && node browser.test.cjs"
+    "test": "node platform.test.cjs && node proyectos.test.cjs && node database.test.cjs && node browser.test.cjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
+    "exceljs": "4.4.0",
     "playwright": "1.63.0"
   }
 }

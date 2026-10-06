@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // app.js — Presupuestos App  (arquitectura Itemizar, multiempresa)
-// Capítulos → Partidas → EDP por avance físico
+// Capítulos → Partidas; la ejecución (estados de pago, gastos) vive en proyectos.js
 // ═══════════════════════════════════════════════════════════
 
 // ── Estado global ────────────────────────────────────────
@@ -8,10 +8,6 @@ const DB_KEY = 'phh_presupuestos_v3';
 let presupuestos    = [];
 let editandoId      = null;   // ID presupuesto en edición (tab Nuevo Presupuesto)
 let contratoActualId= null;   // ID presupuesto en modal contrato
-let edpPresId       = null;   // ID presupuesto con panel EDP abierto
-let edpEditId       = null;   // ID del EDP que se está editando
-let compPresId      = null;   // IDs para modal comprobante
-let compEdpId       = null;
 let catCapId        = null;   // capítulo destino al insertar del catálogo
 let catGrupoActual  = '';
 // Cámara modal contrato
@@ -218,7 +214,7 @@ async function cerrarSesion() {
 }
 
 async function arrancarAppPrincipal() {
-    if (!Plataforma.disponible || Plataforma.puedeOperar()) await cargarDB();
+    if (!Plataforma.disponible || Plataforma.puedeOperar()) { await cargarDB(); await Proyectos.cargar(); }
     else presupuestos = [];
     initFecha();
     initRegiones();
@@ -526,6 +522,7 @@ function mostrarTab(tabId) {
     if (tabId === 'tab-enviados')    renderEnviados();
     if (tabId === 'tab-adjudicados') renderAdjudicados();
     if (tabId === 'tab-ot')          renderOrdenesTrabajo();
+    if (tabId === 'tab-proyectos')   Proyectos.render();
     if (tabId === 'tab-firma')       renderSelectFirma();
     if (tabId === 'tab-empresa')     cargarEquipo();
     if (tabId === 'tab-superadmin')  cargarSuperadmin();
@@ -934,7 +931,7 @@ function guardarPresupuesto() {
     const p = {
         id: uid(), numero: document.getElementById('p-numero').value,
         ...datos,
-        estado: 'enviado', firma: null, edps: [], ordenesTrabajo: [],
+        estado: 'enviado', firma: null, ordenesTrabajo: [],
     };
 
     presupuestos.push(p);
@@ -1225,11 +1222,10 @@ function renderAdjudicados() {
         monedaFmt = p.moneda || 'CLP';
         decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
         const c           = calcPresupuesto(p);
-        const cobrado     = calcCobradoTotal(p);
-        const avancePct   = c.total > 0 ? Math.min((cobrado / c.total) * 100, 100) : 0;
-        const nEdps       = p.edps.length;
-        return `<div class="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden group"
-                    onclick="abrirPanelEDP('${p.id}')">
+        const proy        = Proyectos.resumenPresupuesto(p.id);
+        const cobrado     = proy?.cobrado || 0;
+        const avancePct   = Math.min(proy?.avancePct || 0, 100);
+        return `<div class="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden group">
             <div class="bg-gradient-to-r from-emerald-800 to-emerald-600 px-4 py-3">
                 <p class="text-emerald-100 text-xs font-mono">${esc(p.numero)}</p>
                 <p class="text-white font-bold text-sm mt-0.5 truncate">${esc(p.cliente.nombre)}</p>
@@ -1246,7 +1242,7 @@ function renderAdjudicados() {
                 </div>
                 <div>
                     <div class="flex justify-between text-xs text-slate-500 mb-1">
-                        <span>Avance</span><span class="font-bold text-emerald-700">${avancePct.toFixed(1)}%</span>
+                        <span>Avance estados de pago</span><span class="font-bold text-emerald-700">${avancePct.toFixed(1)}%</span>
                     </div>
                     <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                         <div class="h-2 rounded-full bg-gradient-to-r from-blue-400 to-emerald-500 transition-all" style="width:${avancePct}%"></div>
@@ -1256,8 +1252,12 @@ function renderAdjudicados() {
                     <span class="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-100 text-emerald-700">
                         Adjudicado ${fmtFecha(p.fechaAdjudicacion)}
                     </span>
-                    <span class="text-xs text-slate-400">${nEdps} EDP${nEdps!==1?'s':''}</span>
+                    <span class="text-xs text-slate-400">${proy ? esc(proy.proyecto.codigo) : 'Sin centro de costo'}</span>
                 </div>
+                ${Proyectos.disponible ? `<button onclick="Proyectos.abrirDesdePresupuesto('${p.id}')"
+                    class="w-full text-xs px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold transition-colors">
+                    ${proy ? 'Abrir proyecto en ejecución' : 'Pasar a ejecución (centro de costo)'}
+                </button>` : ''}
                 <div class="flex gap-2">
                     <button onclick="event.stopPropagation(); exportarPDF('${p.id}')"
                         class="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors">PDF</button>
@@ -1276,20 +1276,11 @@ function renderAdjudicados() {
     }).join('');
 }
 
-function calcCobradoTotal(p) {
-    return p.edps
-        .filter(e => e.estado === 'pagado' || e.estado === 'aceptado')
-        .reduce((s, e) => s + (e.totalEDP || 0), 0);
-}
-
 function revertirAdjudicacion(id) {
     const p = presupuestos.find(x => x.id === id);
     if (!p) return;
-    const tieneEdps = p.edps.length > 0;
-    const msg = tieneEdps
-        ? `El contrato ${p.numero} ya tiene ${p.edps.length} EDP(s) registrados. Si revocas la adjudicación, volverá a "Enviados" y se perderá la firma del cliente. ¿Continuar de todas formas?`
-        : `¿Revocar la adjudicación de ${p.numero}? Volverá a "Enviados" y se perderá la firma del cliente registrada.`;
-    if (!confirm(msg)) return;
+    if (Proyectos.existePara(id)) return toast(`${p.numero} tiene un proyecto en ejecución; no se puede revertir la adjudicación`, 'error');
+    if (!confirm(`¿Revocar la adjudicación de ${p.numero}? Volverá a "Enviados" y se perderá la firma del cliente registrada.`)) return;
 
     p.estado = 'enviado';
     p.firma = null;
@@ -1368,6 +1359,10 @@ function renderOrdenesTrabajo() {
                 <div class="flex justify-center gap-1.5 flex-wrap">
                     <button onclick="exportarOTPDF('${p.id}','${ot.id}')"
                         class="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors">PDF</button>
+                    ${Proyectos.disponible && p.estado === 'adjudicado'
+                        ? `<button onclick="Proyectos.abrirDesdePresupuesto('${p.id}')"
+                            class="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold transition-colors">${Proyectos.existePara(p.id) ? 'Proyecto' : 'Pasar a ejecución'}</button>`
+                        : ''}
                     ${ot.estado !== 'firmada'
                         ? `<button onclick="abrirModalOT('${p.id}','${ot.id}')"
                             class="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition-colors">Firmar</button>
@@ -1733,389 +1728,6 @@ async function confirmarFirmaRemota() {
 }
 
 // ════════════════════════════════════════════════════════
-// PANEL EDP · ESTADOS DE PAGO
-// ════════════════════════════════════════════════════════
-function abrirPanelEDP(presId) {
-    edpPresId = presId;
-    const p = presupuestos.find(x => x.id === presId);
-    if (!p) return;
-    document.getElementById('edp-titulo').textContent =
-        `Estados de Pago — ${p.numero}`;
-    document.getElementById('edp-cliente-info').textContent =
-        `${p.cliente.nombre} · ${p.cliente.direccion}, ${p.cliente.comuna}`;
-    renderEDPPanel(presId);
-    const panel = document.getElementById('panel-edp');
-    panel.classList.remove('hidden');
-    setTimeout(() => panel.scrollIntoView({ behavior:'smooth', block:'start' }), 50);
-}
-
-function cerrarPanelEDP() {
-    document.getElementById('panel-edp').classList.add('hidden');
-    edpPresId = null; edpEditId = null;
-}
-
-function renderEDPPanel(presId) {
-    const p  = presupuestos.find(x => x.id === presId);
-    if (!p) return;
-    monedaFmt = p.moneda || 'CLP';
-    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
-    const c  = calcPresupuesto(p);
-    const cobrado  = calcCobradoTotal(p);
-    const saldo    = Math.max(0, c.total - cobrado);
-    const avancePct = c.total > 0 ? Math.min((cobrado / c.total) * 100, 100) : 0;
-
-    const kpis = `
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <div class="kpi rounded-xl border bg-blue-50 border-blue-200 text-blue-800 p-3 text-center">
-                <p class="text-xs opacity-70 font-medium">Total Contrato</p>
-                <p class="text-lg font-black mt-0.5">${fmt(c.total)}</p>
-            </div>
-            <div class="kpi rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 p-3 text-center">
-                <p class="text-xs opacity-70 font-medium">Cobrado</p>
-                <p class="text-lg font-black mt-0.5">${fmt(cobrado)}</p>
-            </div>
-            <div class="kpi rounded-xl border bg-amber-50 border-amber-200 text-amber-800 p-3 text-center">
-                <p class="text-xs opacity-70 font-medium">Saldo</p>
-                <p class="text-lg font-black mt-0.5">${fmt(saldo)}</p>
-            </div>
-            <div class="kpi rounded-xl border bg-purple-50 border-purple-200 text-purple-800 p-3 text-center">
-                <p class="text-xs opacity-70 font-medium">Avance</p>
-                <p class="text-lg font-black mt-0.5">${avancePct.toFixed(1)}%</p>
-            </div>
-        </div>
-        <div class="mb-5">
-            <div class="flex justify-between text-xs text-slate-500 mb-1.5">
-                <span class="font-medium">Avance acumulado de cobros</span>
-                <span class="font-bold">${avancePct.toFixed(1)}%</span>
-            </div>
-            <div class="w-full bg-slate-200 rounded-full h-4 overflow-hidden">
-                <div class="h-4 rounded-full bg-gradient-to-r from-blue-500 via-emerald-400 to-emerald-500 transition-all duration-700" style="width:${avancePct}%"></div>
-            </div>
-        </div>`;
-
-    const listaEdps = p.edps.length ? `
-        <div class="mb-5">
-            <h4 class="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">Historial de EDPs</h4>
-            <div class="space-y-2">
-                ${p.edps.map((edp, i) => {
-                    const badgeClass = { presentado:'badge-presentado', aceptado:'badge-aceptado', pagado:'badge-pagado' }[edp.estado] || '';
-                    return `<div class="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer" onclick="renderEDPEditor('${presId}','${edp.id}')">
-                        <div class="flex items-center gap-3">
-                            <span class="font-mono text-sm font-bold text-slate-700">${esc(edp.numero)}</span>
-                            <span class="text-xs text-slate-400">${fmtFecha(edp.fecha)}</span>
-                            <span class="inline-block text-xs font-bold px-2.5 py-0.5 rounded-full ${badgeClass}">${esc(edp.estado.charAt(0).toUpperCase()+edp.estado.slice(1))}</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="font-bold text-slate-800">${fmt(edp.totalEDP)}</span>
-                            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                        </div>
-                    </div>`;
-                }).join('')}
-            </div>
-        </div>` : '';
-
-    const btnNuevo = avancePct < 100 ? `
-        <button onclick="crearNuevoEDP('${presId}')"
-            class="w-full border-2 border-dashed border-emerald-300 hover:border-emerald-500 hover:bg-emerald-50 rounded-xl py-3 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-all flex items-center justify-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-            Crear Nuevo EDP
-        </button>` : `<p class="text-center text-emerald-700 font-bold bg-emerald-50 rounded-xl py-3 border border-emerald-200">✓ Contrato completado al 100%</p>`;
-
-    document.getElementById('edp-body').innerHTML =
-        kpis + listaEdps + btnNuevo + `<div id="edp-editor" class="mt-5"></div>`;
-}
-
-function crearNuevoEDP(presId) {
-    const p = presupuestos.find(x => x.id === presId);
-    if (!p) return;
-    const nextNum = (p.edps.length + 1).toString().padStart(3, '0');
-    const edp = {
-        id: uid(),
-        numero: `EDP-${p.numero}-${nextNum}`,
-        fecha: new Date().toISOString().slice(0,10),
-        estado: 'presentado',
-        itemsAvance: [],  // { itemId, capId, pctActual, monto }
-        totalEDP: 0,
-        comprobante: null,
-        facturaNumero: '',
-    };
-    // Inicializar itemsAvance con todos los items del presupuesto
-    p.capitulos.forEach(cap => {
-        cap.items.forEach(item => {
-            const pctAnt = calcPctAnterior(p, item.id);
-            edp.itemsAvance.push({
-                itemId: item.id, capId: cap.id,
-                pctActual: pctAnt,  // comienza desde donde quedó
-                monto: 0,
-            });
-        });
-    });
-    p.edps.push(edp);
-    guardarDB();
-    renderEDPPanel(presId);
-    renderEDPEditor(presId, edp.id);
-}
-
-function calcPctAnterior(p, itemId) {
-    // El % anterior es el máximo pctActual de todos los EDPs cerrados (no presentado)
-    return p.edps
-        .filter(e => e.estado !== 'presentado')
-        .reduce((max, e) => {
-            const ia = e.itemsAvance.find(x => x.itemId === itemId);
-            return Math.max(max, ia?.pctActual || 0);
-        }, 0);
-}
-
-function renderEDPEditor(presId, edpId) {
-    edpEditId = edpId;
-    const p   = presupuestos.find(x => x.id === presId);
-    const edp = p?.edps.find(x => x.id === edpId);
-    if (!p || !edp) return;
-    monedaFmt = p.moneda || 'CLP';
-    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
-
-    const iaMap = {};
-    edp.itemsAvance.forEach(ia => { iaMap[ia.itemId] = ia; });
-
-    const estadoBadge = { presentado:'badge-presentado', aceptado:'badge-aceptado', pagado:'badge-pagado' }[edp.estado]||'';
-    const editable = edp.estado === 'presentado';
-
-    let capsHtml = '';
-    p.capitulos.forEach(cap => {
-        let capMonto = 0;
-        let itemsHtml = '';
-        cap.items.forEach(item => {
-            const ia        = iaMap[item.id] || { pctActual: 0, monto: 0 };
-            const pctAnt    = calcPctAnterior(p, item.id);
-            const pctAct    = ia.pctActual;
-            const pctPer    = Math.max(0, pctAct - pctAnt);
-            const montoPer  = item.total * pctPer / 100;
-            capMonto += montoPer;
-            itemsHtml += `
-                <tr class="border-t border-slate-100 hover:bg-slate-50" data-item-id="${item.id}">
-                    <td class="px-3 py-2 text-xs font-mono text-slate-400">${esc(item.numero)}</td>
-                    <td class="px-3 py-2 text-sm text-slate-800 max-w-xs">${esc(item.descripcion)}</td>
-                    <td class="px-3 py-2 text-right font-semibold text-sm">${fmt(item.total)}</td>
-                    <td class="px-3 py-2 text-center text-sm text-slate-400 font-mono">${pctAnt}%</td>
-                    <td class="px-3 py-2 text-center">
-                        ${editable
-                            ? `<input type="number" class="edp-pct-input w-16 text-center border border-slate-300 rounded-lg px-1 py-1 text-xs font-bold focus:ring-2 focus:ring-emerald-400 outline-none"
-                                min="${pctAnt}" max="100" value="${pctAct}" step="5"
-                                data-item-id="${item.id}" data-item-total="${item.total}" data-pct-ant="${pctAnt}"
-                                oninput="recalcularItemEDP(this,'${presId}','${edpId}')">`
-                            : `<span class="font-bold text-sm">${pctAct}%</span>`
-                        }
-                    </td>
-                    <td class="px-3 py-2 text-center text-sm font-semibold text-blue-700 pct-per">${pctPer}%</td>
-                    <td class="px-3 py-2 text-right font-bold text-emerald-700 monto-edp">${fmt(montoPer)}</td>
-                </tr>`;
-        });
-        capsHtml += `
-            <div class="mb-4 border border-slate-200 rounded-xl overflow-hidden">
-                <div class="bg-slate-800 px-4 py-2 flex justify-between items-center">
-                    <span class="text-white font-bold text-sm">${esc(cap.numero)} — ${esc(cap.nombre||'Sin nombre')}</span>
-                    <span class="text-amber-400 font-bold text-sm cap-edp-total" data-cap="${cap.id}">${fmt(capMonto)}</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="bg-slate-50 text-slate-500 uppercase text-xs">
-                            <tr>
-                                <th class="px-3 py-2 text-left w-16">N°</th>
-                                <th class="px-3 py-2 text-left">Descripción</th>
-                                <th class="px-3 py-2 text-right w-28">Contrato</th>
-                                <th class="px-3 py-2 text-center w-20">Ant.%</th>
-                                <th class="px-3 py-2 text-center w-24">Act.%</th>
-                                <th class="px-3 py-2 text-center w-20">Per.%</th>
-                                <th class="px-3 py-2 text-right w-28">Monto EDP</th>
-                            </tr>
-                        </thead>
-                        <tbody>${itemsHtml}</tbody>
-                    </table>
-                </div>
-            </div>`;
-    });
-
-    const totalEdp = edp.itemsAvance.reduce((s, ia) => s + (ia.monto||0), 0);
-
-    const acciones = editable ? `
-        <div class="flex flex-wrap gap-3 justify-between items-center mt-4 pt-4 border-t border-slate-200">
-            <div class="flex gap-2">
-                <button onclick="cambiarEstadoEDP('${presId}','${edpId}','aceptado')"
-                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-4 rounded-xl text-sm transition-colors">
-                    Marcar como Aceptado
-                </button>
-            </div>
-            <button onclick="guardarEDP('${presId}','${edpId}')"
-                class="bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 px-5 rounded-xl text-sm transition-colors">
-                Guardar EDP
-            </button>
-        </div>` :
-    edp.estado === 'aceptado' ? `
-        <div class="flex gap-3 mt-4 pt-4 border-t border-slate-200">
-            <button onclick="abrirModalComprobante('${presId}','${edpId}')"
-                class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded-xl text-sm transition-colors flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                Registrar Pago con Comprobante
-            </button>
-        </div>` :
-    edp.comprobante ? `
-        <div class="mt-4 pt-4 border-t border-slate-200">
-            <p class="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-2">✓ Pago registrado — Fact. ${esc(edp.facturaNumero||'—')}</p>
-            <img src="${edp.comprobante}" class="max-h-32 rounded-xl border border-slate-200" alt="Comprobante">
-        </div>` : '';
-
-    document.getElementById('edp-editor').innerHTML = `
-        <div class="border-2 border-emerald-200 rounded-2xl overflow-hidden">
-            <div class="bg-emerald-800 px-5 py-3 flex items-center justify-between">
-                <div>
-                    <span class="text-white font-bold">${esc(edp.numero)}</span>
-                    <span class="ml-3 text-xs text-emerald-300">${fmtFecha(edp.fecha)}</span>
-                </div>
-                <span class="text-xs font-bold px-3 py-1 rounded-full ${estadoBadge}">${edp.estado.charAt(0).toUpperCase()+edp.estado.slice(1)}</span>
-            </div>
-            <div class="p-4">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs mb-2">
-                        <thead><tr class="bg-slate-100 text-slate-500 uppercase">
-                            <th class="px-3 py-2 text-left" colspan="2">Encabezado columnas</th>
-                        </tr></thead>
-                    </table>
-                </div>
-                ${capsHtml}
-                <div class="flex justify-end items-center gap-4 bg-slate-900 rounded-xl px-5 py-3">
-                    <span class="text-white font-black text-base">Total EDP</span>
-                    <span class="text-amber-400 font-black text-xl" id="edp-total-display">${fmt(totalEdp)}</span>
-                </div>
-                ${acciones}
-            </div>
-        </div>`;
-}
-
-function recalcularItemEDP(input, presId, edpId) {
-    const p   = presupuestos.find(x => x.id === presId);
-    const edp = p?.edps.find(x => x.id === edpId);
-    if (!p || !edp) return;
-    monedaFmt = p.moneda || 'CLP';
-    decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
-
-    const itemId   = input.dataset.itemId;
-    const total    = parseFloat(input.dataset.itemTotal) || 0;
-    const pctAnt   = parseFloat(input.dataset.pctAnt)    || 0;
-    let   pctAct   = parseFloat(input.value) || 0;
-
-    // Clamp
-    pctAct = Math.max(pctAnt, Math.min(100, pctAct));
-    input.value = pctAct;
-
-    const pctPer   = Math.max(0, pctAct - pctAnt);
-    const montoPer = total * pctPer / 100;
-
-    // Actualizar estado en memoria
-    const ia = edp.itemsAvance.find(x => x.itemId === itemId);
-    if (ia) { ia.pctActual = pctAct; ia.monto = montoPer; }
-
-    // Actualizar fila DOM
-    const tr = input.closest('tr');
-    if (tr) {
-        tr.querySelector('.pct-per').textContent  = `${pctPer}%`;
-        tr.querySelector('.monto-edp').textContent = fmt(montoPer);
-    }
-
-    // Recalcular total EDP
-    const nuevoTotal = edp.itemsAvance.reduce((s, x) => s + (x.monto||0), 0);
-    edp.totalEDP = nuevoTotal;
-    const disp = document.getElementById('edp-total-display');
-    if (disp) disp.textContent = fmt(nuevoTotal);
-
-    // Recalcular subtotal del capítulo
-    const capId = input.closest('tr')?.closest('div')?.querySelector('[data-cap]')?.dataset?.cap;
-    // (omitido por complejidad DOM — se actualiza al guardar)
-}
-
-function guardarEDP(presId, edpId) {
-    const p   = presupuestos.find(x => x.id === presId);
-    const edp = p?.edps.find(x => x.id === edpId);
-    if (!p || !edp) return;
-    // Leer todos los inputs del editor
-    document.querySelectorAll('#edp-editor .edp-pct-input').forEach(input => {
-        const itemId   = input.dataset.itemId;
-        const total    = parseFloat(input.dataset.itemTotal) || 0;
-        const pctAnt   = parseFloat(input.dataset.pctAnt)    || 0;
-        const pctAct   = Math.max(pctAnt, Math.min(100, parseFloat(input.value)||0));
-        const monto    = total * Math.max(0, pctAct - pctAnt) / 100;
-        const ia = edp.itemsAvance.find(x => x.itemId === itemId);
-        if (ia) { ia.pctActual = pctAct; ia.monto = monto; }
-    });
-    edp.totalEDP = edp.itemsAvance.reduce((s, ia) => s + (ia.monto||0), 0);
-    guardarDB();
-    renderAdjudicados();
-    toast(`EDP ${edp.numero} guardado`, 'success');
-}
-
-function cambiarEstadoEDP(presId, edpId, nuevoEstado) {
-    guardarEDP(presId, edpId); // guardar primero
-    const p   = presupuestos.find(x => x.id === presId);
-    const edp = p?.edps.find(x => x.id === edpId);
-    if (!p || !edp) return;
-    edp.estado = nuevoEstado;
-    guardarDB();
-    renderEDPPanel(presId);
-    renderEDPEditor(presId, edpId);
-    renderAdjudicados();
-    toast(`EDP → ${nuevoEstado.charAt(0).toUpperCase()+nuevoEstado.slice(1)}`, 'success');
-}
-
-// ── Modal comprobante EDP ─────────────────────────────────
-function abrirModalComprobante(presId, edpId) {
-    compPresId = presId; compEdpId = edpId;
-    limpiarCompPreview();
-    document.getElementById('comp-factura').value = '';
-    document.getElementById('comp-obs').value     = '';
-    abrirModal('modal-comprobante');
-}
-
-function handleDropComp(e) {
-    e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f) procesarArchivoComp(f);
-}
-function previewComp(e) { const f = e.target.files[0]; if(f) procesarArchivoComp(f); }
-function procesarArchivoComp(file) {
-    if (!file.type.startsWith('image/')) return toast('Solo imágenes', 'error');
-    const r = new FileReader();
-    r.onload = ev => {
-        document.getElementById('comp-preview-img').src = ev.target.result;
-        document.getElementById('comp-preview-wrap').classList.remove('hidden');
-        document.getElementById('comp-upload-zona').classList.add('hidden');
-    };
-    r.readAsDataURL(file);
-}
-function limpiarCompPreview() {
-    document.getElementById('comp-preview-img').src = '';
-    document.getElementById('comp-preview-wrap').classList.add('hidden');
-    document.getElementById('comp-upload-zona').classList.remove('hidden');
-    document.getElementById('comp-file').value = '';
-}
-
-function confirmarComprobante() {
-    const factura = document.getElementById('comp-factura').value.trim();
-    if (!factura) return toast('Ingresa el N° de factura o boleta', 'error');
-    const p   = presupuestos.find(x => x.id === compPresId);
-    const edp = p?.edps.find(x => x.id === compEdpId);
-    if (!p || !edp) return;
-    edp.facturaNumero = factura;
-    edp.comprobante   = document.getElementById('comp-preview-img').src || null;
-    edp.obs           = document.getElementById('comp-obs').value.trim();
-    edp.estado        = 'pagado';
-    guardarDB();
-    cerrarModal('modal-comprobante');
-    renderEDPPanel(compPresId);
-    renderEDPEditor(compPresId, compEdpId);
-    renderAdjudicados();
-    toast(`EDP ${edp.numero} registrado como pagado`, 'success');
-}
-
-// ════════════════════════════════════════════════════════
 // TAB 4 · FIRMA STANDALONE
 // ════════════════════════════════════════════════════════
 function initFirmaStandalone() {
@@ -2292,7 +1904,7 @@ function cerrarModal(id) {
     document.body.style.overflow='';
 }
 document.addEventListener('click', e=>{
-    ['modal-contrato','modal-comprobante','modal-catalogo','modal-ot','modal-link-firma'].forEach(id=>{
+    ['modal-contrato','modal-catalogo','modal-ot','modal-link-firma'].forEach(id=>{
         const el=document.getElementById(id);
         if(el && e.target===el) {
             cerrarModal(id);

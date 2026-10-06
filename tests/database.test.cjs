@@ -7,6 +7,8 @@ const admin='11111111-1111-4111-8111-111111111111', client='22222222-2222-4222-8
 const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 await db.exec("create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,email text); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth,public to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;");
 await db.exec('alter default privileges in schema public grant all on tables to authenticated,anon;');
+// Esquema mínimo equivalente al de Supabase Storage.
+await db.exec("create schema storage; create table storage.buckets(id text primary key,name text,public boolean default false,file_size_limit bigint,allowed_mime_types text[]); create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text,owner uuid); create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$; alter table storage.objects enable row level security; grant usage on schema storage to anon,authenticated; grant select,insert,delete on storage.objects to authenticated;");
 const base=fs.readFileSync('supabase_schema.sql','utf8');
 await db.exec(base.slice(0,base.indexOf('-- PASO 2')));
 await db.exec("insert into auth.users values ('"+admin+"','admin@test.local'),('"+client+"','cliente@test.local'),('"+member+"','miembro@test.local'); insert into public.empresas(id,nombre_comercial,aprobada,limite_usuarios) values ('"+a+"','Plataforma',true,3),('"+b+"','Cliente',true,3); insert into public.perfiles(id,empresa_id,rol,es_superadmin) values ('"+admin+"','"+a+"','admin',true),('"+client+"','"+b+"','admin',false),('"+member+"','"+b+"','miembro',false); insert into public.presupuestos(id,empresa_id,data) values ('p1','"+a+"','{}'),('p2','"+b+"','{}');");
@@ -89,6 +91,76 @@ assert.equal(await value("select count(*)::int v from public.plataforma_historia
 
 await as(newuser);
 await rejects("select public.estado_servicio('"+b+"')",/No autorizado/);
+
+// ── Ejecución de proyectos ──
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610060001_proyectos.sql','utf8'));
+const d='dddddddd-dddd-4ddd-8ddd-dddddddddddd',e2='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const jefe='77777777-7777-4777-8777-777777777777',obrero='88888888-8888-4888-8888-888888888888',otro='99999999-9999-4999-8999-999999999999';
+await db.exec("insert into auth.users values('"+jefe+"','jefe@test.local'),('"+obrero+"','obrero@test.local'),('"+otro+"','otro@test.local'); insert into public.empresas(id,nombre_comercial,aprobada,estado_acceso,acceso_transitorio,limite_usuarios) values('"+d+"','Constructora',true,'autorizada',true,5),('"+e2+"','Otra',true,'autorizada',true,5); insert into public.perfiles(id,empresa_id,rol) values('"+jefe+"','"+d+"','admin'),('"+obrero+"','"+d+"','miembro'),('"+otro+"','"+e2+"','admin'); insert into public.presupuestos(id,empresa_id,data) values('pd','"+d+"','{}'),('pe','"+e2+"','{}');");
+const altaProyecto="insert into public.proyectos(empresa_id,presupuesto_id,codigo,nombre,administrador_id) values('"+d+"','pd','CC-1','Obra','"+jefe+"') returning id v";
+await as(obrero);
+await rejects(altaProyecto,/row-level security/);
+await as(otro);
+await rejects("insert into public.proyectos(empresa_id,presupuesto_id,codigo,nombre) values('"+e2+"','pd','CC-X','Ajeno')",/Presupuesto inexistente/);
+await as(jefe);
+const pid2=await value(altaProyecto);
+await as(otro);
+assert.equal(await value("select count(*)::int v from public.proyectos"),0);
+await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pid2+"','2026-10-01','generales','Intruso',1000)",/row-level security/);
+// Estados de pago: secuencia y montos congelados.
+await as(obrero);
+await rejects("insert into public.proyecto_edps(proyecto_id) values('"+pid2+"')",/row-level security/);
+await as(jefe);
+const ep1=await value("insert into public.proyecto_edps(proyecto_id,numero,estado,items) values('"+pid2+"',99,'pagado','[1]') returning id v");
+assert.equal(await value("select numero::text||estado v from public.proyecto_edps where id='"+ep1+"'"),'1borrador');
+await rejects("insert into public.proyecto_edps(proyecto_id) values('"+pid2+"')",/abierto/);
+await rejects("update public.proyecto_edps set estado='aprobado' where id='"+ep1+"'",/no permitido/);
+await db.exec("update public.proyecto_edps set estado='presentado' where id='"+ep1+"'");
+assert.equal(await value("select fecha_presentacion is not null v from public.proyecto_edps where id='"+ep1+"'"),true);
+await rejects("update public.proyecto_edps set items='[2]' where id='"+ep1+"'",/presentado/);
+await db.exec("update public.proyecto_edps set estado='aprobado',fecha_pago_estimada='2026-10-30' where id='"+ep1+"'");
+await rejects("update public.proyecto_edps set estado='pagado' where id='"+ep1+"'",/fecha de pago/);
+await db.exec("update public.proyecto_edps set estado='pagado',fecha_pago_real='2026-11-02',comprobante_path='x.pdf' where id='"+ep1+"'");
+const ep2=await value("insert into public.proyecto_edps(proyecto_id) values('"+pid2+"') returning id v");
+assert.equal(await value("select numero v from public.proyecto_edps where id='"+ep2+"'"),2);
+await db.exec("delete from public.proyecto_edps where id in ('"+ep1+"','"+ep2+"')");
+assert.equal(await value("select count(*)::int v from public.proyecto_edps"),1);
+// Gastos: el trabajador registra, el administrador del proyecto aprueba.
+await as(obrero);
+const g1=await value("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,subcategoria,descripcion,monto,estado,registrado_por) values('"+pid2+"','2026-10-02','generales','Petróleo','Camioneta',45000,'aprobado','"+jefe+"') returning id v");
+assert.equal(await value("select estado||registrado_por::text v from public.proyecto_gastos where id='"+g1+"'"),'pendiente'+obrero);
+await db.exec("update public.proyecto_gastos set monto=46000 where id='"+g1+"'");
+await rejects("update public.proyecto_gastos set estado='aprobado' where id='"+g1+"'",/Solo el administrador/);
+await as(jefe);
+await rejects("update public.proyecto_gastos set estado='rechazado' where id='"+g1+"'",/motivo/);
+await db.exec("update public.proyecto_gastos set estado='rechazado',motivo_rechazo='Sin boleta' where id='"+g1+"'");
+assert.equal(await value("select revisado_por::text v from public.proyecto_gastos where id='"+g1+"'"),jefe);
+await as(obrero);
+await rejects("update public.proyecto_gastos set monto=1 where id='"+g1+"'",/pendientes/);
+await db.exec("delete from public.proyecto_gastos where id='"+g1+"'");
+assert.equal(await value("select count(*)::int v from public.proyecto_gastos"),1);
+await as(jefe);
+await db.exec("update public.proyectos set administrador_id='"+obrero+"' where id='"+pid2+"'");
+await as(obrero);
+const g2=await value("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pid2+"','2026-10-03','materiales','Yeso',120000) returning id v");
+await db.exec("update public.proyecto_gastos set estado='aprobado' where id='"+g2+"'");
+await rejects("update public.proyectos set administrador_id='"+jefe+"' where id='"+pid2+"'",/Solo el administrador de la empresa/);
+// Archivos por carpeta de empresa.
+await as(jefe);
+await db.exec("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/a.jpg')");
+await as(otro);
+assert.equal(await value("select count(*)::int v from storage.objects"),0);
+await rejects("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/b.jpg')",/row-level security/);
+await as(jefe);
+await rejects("delete from public.proyectos where id='"+pid2+"'",/foreign key/);
+// Sin acceso operativo no se lee ni se registra nada.
+await as(admin);
+await db.exec("select public.plataforma_cambiar_acceso('"+d+"','suspendida','Prueba de suspensión')");
+await as(jefe);
+assert.equal(await value("select count(*)::int v from public.proyectos"),0);
+await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pid2+"','2026-10-04','generales','Colación',8000)",/row-level security/);
+assert.equal(await value("select count(*)::int v from storage.objects"),0);
 await db.close();
-console.log('Migración ejecutada en PostgreSQL temporal: permisos, aislamiento, deuda, pagos idempotentes, cupos y bloqueo correctos.');
+console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) y proyectos (estados de pago, gastos, archivos, aislamiento) correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});
