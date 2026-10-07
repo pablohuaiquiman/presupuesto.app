@@ -50,7 +50,7 @@
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
         input[type=number] { -moz-appearance:textfield; }
     </style>
-<link rel="stylesheet" href="platform.css?v=20261006c">
+<link rel="stylesheet" href="platform.css?v=20261007b">
 </head>
 <body class="bg-slate-100 min-h-screen antialiased">
 
@@ -299,6 +299,20 @@
                 <span class="text-xs sm:text-sm font-semibold leading-tight flex items-center gap-1">
                     Proyectos
                     <span id="badge-proyectos" class="hidden bg-red-400 text-red-900 text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">0</span>
+                </span>
+            </button>
+
+            <!-- Órdenes de compra -->
+            <button id="nav-compras" data-tab="tab-compras" onclick="mostrarTab('tab-compras')"
+                class="hidden tab-btn group relative flex flex-1 shrink-0 min-w-[4.75rem] whitespace-nowrap flex-col lg:flex-row items-center justify-center gap-1 sm:gap-2
+                       py-3 px-2 text-center border-b-2 transition-all
+                       border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+                <span class="text-xs sm:text-sm font-semibold leading-tight">
+                    <span class="hidden sm:inline">Órdenes de Compra</span>
+                    <span class="sm:hidden">Compras</span>
                 </span>
             </button>
 
@@ -772,6 +786,7 @@
     </section>
 
 <section id="tab-proyectos" class="tab-content hidden"><div id="pr-root"></div></section>
+<section id="tab-compras" class="tab-content hidden"><div id="oc-root"></div></section>
 <section id="tab-superadmin" class="tab-content hidden pl-platform"><div id="pl-admin"></div></section>
 <section id="tab-suscripcion" class="tab-content hidden pl-platform"><div id="pl-subscription"></div></section>
 </main>
@@ -1005,9 +1020,10 @@
 </div>
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
-<script src="data.js?v=20261006c"></script>
-<script src="app.js?v=20261006c"></script>
-<script src="platform.js?v=20261006c"></script>
-<script src="proyectos.js?v=20261006c"></script>
+<script src="data.js?v=20261007a"></script>
+<script src="app.js?v=20261007b"></script>
+<script src="platform.js?v=20261007b"></script>
+<script src="proyectos.js?v=20261007a"></script>
+<script src="compras.js?v=20261007a"></script>
 </body>
 </html>

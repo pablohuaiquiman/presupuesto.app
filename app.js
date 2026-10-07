@@ -115,13 +115,18 @@ async function resolverSesion() {
     if (!perfil) { mostrarBloque('onboarding'); mostrarSoloGate('login-gate'); return; }
     miPerfil = perfil;
 
-    const { data: empresa, error: empresaErr } = await supa.from('empresas').select('*').eq('id', perfil.empresa_id).maybeSingle();
-    if (empresaErr || !empresa) { toast('No se pudo cargar tu empresa', 'error'); return; }
+    // Los colaboradores de plataforma pueden no tener empresa: solo usan el panel de administración.
+    let empresa = null;
+    if (perfil.empresa_id) {
+        const { data, error: empresaErr } = await supa.from('empresas').select('*').eq('id', perfil.empresa_id).maybeSingle();
+        if (empresaErr || !data) { toast('No se pudo cargar tu empresa', 'error'); return; }
+        empresa = data;
+    }
     empresaActual = empresa;
 
     try { await Plataforma.resolverSesion(); }
     catch (error) { toast(error.message, 'error'); mostrarLogin(); return; }
-    if (!Plataforma.disponible && !empresa.aprobada && !perfil.es_superadmin) {
+    if (empresa && !Plataforma.disponible && !empresa.aprobada && !perfil.es_superadmin) {
         document.getElementById('pending-empresa-nombre').textContent = empresa.nombre_comercial;
         mostrarSoloGate('pending-gate');
         return;
@@ -214,7 +219,7 @@ async function cerrarSesion() {
 }
 
 async function arrancarAppPrincipal() {
-    if (!Plataforma.disponible || Plataforma.puedeOperar()) { await cargarDB(); await Proyectos.cargar(); }
+    if (!Plataforma.disponible || Plataforma.puedeOperar()) { await cargarDB(); await Proyectos.cargar(); await Compras.cargar(); }
     else presupuestos = [];
     initFecha();
     initRegiones();
@@ -391,6 +396,7 @@ async function onSubmitEmpresa(e) {
 }
 
 async function cargarEquipo() {
+    if (!empresaActual) return;
     const { data, error } = await supa.from('perfiles').select('*').eq('empresa_id', empresaActual.id).order('creado_en');
     const lista = document.getElementById('equipo-lista');
     if (error) { lista.innerHTML = `<p class="text-xs text-red-500">${esc(error.message)}</p>`; return; }
@@ -532,6 +538,7 @@ function mostrarTab(tabId) {
     if (tabId === 'tab-adjudicados') renderAdjudicados();
     if (tabId === 'tab-ot')          renderOrdenesTrabajo();
     if (tabId === 'tab-proyectos')   Proyectos.render();
+    if (tabId === 'tab-compras')     Compras.render();
     if (tabId === 'tab-firma')       renderSelectFirma();
     if (tabId === 'tab-empresa')     cargarEquipo();
     if (tabId === 'tab-superadmin')  cargarSuperadmin();

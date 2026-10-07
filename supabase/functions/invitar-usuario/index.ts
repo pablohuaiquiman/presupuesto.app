@@ -18,7 +18,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
   try {
-    const { email, nombre } = await req.json();
+    const { email, nombre, colaborador, permisos } = await req.json();
     if (!email) return json({ error: 'Falta el correo del invitado' }, 400);
 
     const authHeader = req.headers.get('Authorization') || '';
@@ -37,8 +37,30 @@ Deno.serve(async (req) => {
     const supaAdmin = createClient(supabaseUrl, serviceKey);
 
     const { data: perfil } = await supaAdmin
-      .from('perfiles').select('empresa_id, rol').eq('id', user.id).single();
+      .from('perfiles').select('empresa_id, rol, es_superadmin').eq('id', user.id).single();
     if (!perfil) return json({ error: 'No se encontró tu perfil' }, 404);
+
+    // Colaborador de plataforma: solo el dueño invita; entra sin empresa y no ocupa cupos.
+    if (colaborador) {
+      if (!perfil.es_superadmin) return json({ error: 'Solo el dueño de la plataforma invita colaboradores' }, 403);
+      const lista = Array.isArray(permisos) ? [...new Set(permisos)].sort() : [];
+      if (lista.some(p => !['acceso', 'suscripciones'].includes(p))) return json({ error: 'Permiso inválido' }, 400);
+
+      const { data: invited, error: inviteErr } = await supaAdmin.auth.admin.inviteUserByEmail(email);
+      if (inviteErr || !invited?.user) {
+        return json({ error: inviteErr?.message || 'No se pudo invitar al colaborador' }, 400);
+      }
+      const { error: perfilErr } = await supaAdmin.from('perfiles').insert({
+        id: invited.user.id, empresa_id: null, rol: 'miembro', nombre: nombre || null,
+        colaborador_plataforma: true, permisos_plataforma: lista,
+      });
+      if (perfilErr) return json({ error: 'Invitación enviada pero no se pudo registrar al colaborador: ' + perfilErr.message }, 500);
+      await supaAdmin.from('plataforma_historial').insert({
+        empresa_id: null, actor: user.id, accion: 'colaborador',
+        detalle: { cambio: 'invitar', usuario: invited.user.id, email: String(email).trim().toLowerCase(), permisos: lista },
+      });
+      return json({ ok: true });
+    }
     if (perfil.rol !== 'admin') return json({ error: 'Solo el administrador de tu empresa puede invitar usuarios' }, 403);
 
     const { data: acceso, error: accesoErr } = await supaCaller.rpc('estado_servicio', { p_empresa_id: perfil.empresa_id });

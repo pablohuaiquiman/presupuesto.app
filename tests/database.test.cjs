@@ -184,6 +184,58 @@ await db.exec("reset role");
 assert.equal(await value("select periodos_pagados v from public.suscripciones where empresa_id='"+e2+"'"),1);
 assert.equal(await value("select origen||referencia||(registrado_por is null)::text v from public.pagos_suscripcion where empresa_id='"+e2+"'"),'mercadopagomp-123true');
 assert.equal(await value("select count(*)::int v from public.plataforma_historial where empresa_id='"+e2+"' and actor is null"),2);
+
+// ── Colaboradores de plataforma y eliminación completa de empresas ──
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610070003_colaboradores.sql','utf8'));
+const col='12121212-1212-4212-8212-121212121212';
+await db.exec("insert into auth.users values('"+col+"','Colab@test.local')");
+await as(client);
+await rejects("select public.plataforma_agregar_colaborador('colab@test.local','{suscripciones}')",/No autorizado/);
+assert.equal(await value("select count(*)::int v from public.plataforma_listar_colaboradores()"),0);
+await as(admin);
+await rejects("select public.plataforma_agregar_colaborador('colab@test.local','{eliminar}')",/Permiso inválido/);
+assert.equal(await value("select public.plataforma_agregar_colaborador('nadie@test.local','{}') v"),'sin_cuenta');
+assert.equal(await value("select public.plataforma_agregar_colaborador(' COLAB@test.local ','{suscripciones,suscripciones}') v"),'agregado');
+assert.equal(await value("select empresa_id is null and permisos_plataforma='{suscripciones}' v from public.perfiles where id='"+col+"'"),true);
+assert.equal(await value("select email v from public.plataforma_listar_colaboradores()"),'Colab@test.local');
+// Con 'suscripciones': ve todo el panel y gestiona planes, pero no acceso, cupos ni eliminación.
+await as(col);
+assert.equal(await value("select count(*)::int v from public.empresas"),4);
+assert.ok(await value("select count(*)::int v from public.pagos_suscripcion")>0);
+await db.exec("select public.plataforma_configurar_suscripcion('"+e2+"','Mensual',30000,'2026-10-01',5,false)");
+await rejects("select public.set_limite_usuarios('"+e2+"',6)",/No autorizado/);
+await rejects("select public.plataforma_cambiar_acceso('"+e2+"','bloqueada','Prueba colaborador')",/No autorizado/);
+await rejects("select public.plataforma_eliminar_empresa('"+e2+"','Otra')",/Solo el dueño/);
+await rejects("select public.plataforma_agregar_colaborador('otro@test.local','{acceso}')",/No autorizado/);
+await rejects("update public.perfiles set permisos_plataforma='{acceso}' where id='"+col+"'",/permission denied/);
+assert.equal(await value("select count(*)::int v from public.presupuestos"),0);
+await as(admin);
+await db.exec("select public.plataforma_permisos_colaborador('"+col+"','{acceso}')");
+await as(col);
+await db.exec("select public.set_limite_usuarios('"+e2+"',6)");
+await rejects("select public.plataforma_configurar_suscripcion('"+e2+"','Mensual',30000,'2026-10-01',5,false)",/No autorizado/);
+// Quitar a un colaborador sin empresa borra su perfil.
+await as(admin);
+await db.exec("select public.plataforma_quitar_colaborador('"+col+"')");
+assert.equal(await value("select count(*)::int v from public.perfiles where id='"+col+"'"),0);
+await as(col);
+assert.equal(await value("select count(*)::int v from public.empresas"),0);
+// Un miembro de empresa puede ser colaborador; si su empresa se elimina, conserva el rol sin empresa.
+await as(admin);
+assert.equal(await value("select public.plataforma_agregar_colaborador('obrero@test.local','{}') v"),'agregado');
+await rejects("select public.plataforma_eliminar_empresa('"+d+"','constructora')",/nombre exacto/);
+await rejects("select public.plataforma_eliminar_empresa('"+a+"','Plataforma')",/administradores de plataforma/);
+await db.exec("select public.plataforma_eliminar_empresa('"+d+"','Constructora')");
+await db.exec("select public.plataforma_eliminar_empresa('"+e2+"','Otra')");
+await db.exec("reset role");
+for (const [tabla,id] of [['empresas','id'],['presupuestos','empresa_id'],['proyectos','empresa_id'],['proyecto_gastos','empresa_id'],['proyecto_edps','empresa_id'],['suscripciones','empresa_id'],['pagos_suscripcion','empresa_id'],['cobros_mp','empresa_id']])
+    assert.equal(await value("select count(*)::int v from public."+tabla+" where "+id+" in ('"+d+"','"+e2+"')"),0,tabla);
+assert.equal(await value("select count(*)::int v from storage.objects where name like '"+d+"/%'"),0);
+assert.equal(await value("select count(*)::int v from public.perfiles where id in ('"+jefe+"','"+otro+"')"),0);
+assert.equal(await value("select empresa_id is null and colaborador_plataforma v from public.perfiles where id='"+obrero+"'"),true);
+assert.equal(await value("select count(*)::int v from auth.users where id in ('"+jefe+"','"+otro+"')"),2);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial where accion='eliminacion' and detalle->>'nombre' in ('Constructora','Otra')"),2);
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) y proyectos (estados de pago, gastos, archivos, aislamiento) correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});

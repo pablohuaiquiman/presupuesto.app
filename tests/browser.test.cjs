@@ -9,11 +9,11 @@ function mock(opts){
  const tables={
   empresas:[{id:a,nombre_comercial:'Constructora PHH',razon_social:'CONSTRUCTORA E INSTALACIONES PHH SPA',rut:'77234145-8',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:3,perfiles:[{count:1}]},
    {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
-  perfiles:[{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
+  perfiles:[opts.perfil||{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
   presupuestos:opts.presupuestos.map(p=>({id:p.id,empresa_id:a,data:p})),
-  suscripciones:(opts.suscripciones||[]).map(s=>({empresa_id:a,...s})),pagos_suscripcion:[],plataforma_historial:[],cobros_mp:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[]
+  suscripciones:(opts.suscripciones||[]).map(s=>({empresa_id:a,...s})),pagos_suscripcion:[],plataforma_historial:[],cobros_mp:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[],ordenes_compra:[]
  };
- window.fixture={tables,calls:[],uploads:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
+ window.fixture={tables,colaboradores:[],calls:[],uploads:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
  const hoy=()=>new Date().toISOString().slice(0,10);
  function alta(table,r){
   const base={id:crypto.randomUUID(),creado_en:new Date().toISOString(),...r};
@@ -47,6 +47,9 @@ function mock(opts){
   async rpc(name,args) {
    window.fixture.calls.push({name,args});
    if(name==='estado_servicio')return {data:structuredClone(window.fixture.state),error:null};
+   if(name==='plataforma_listar_colaboradores')return {data:structuredClone(window.fixture.colaboradores),error:null};
+   if(name==='plataforma_agregar_colaborador'){window.fixture.colaboradores.push({id:crypto.randomUUID(),email:args.p_email,nombre:null,empresa:null,permisos:args.p_permisos});return {data:'agregado',error:null};}
+   if(name==='plataforma_permisos_colaborador')window.fixture.colaboradores.find(c=>c.id===args.p_usuario).permisos=args.p_permisos;
    if(name==='plataforma_configurar_suscripcion'){
     let s=tables.suscripciones.find(s=>s.empresa_id===args.p_empresa_id);
     if(!s){s={empresa_id:args.p_empresa_id,periodos_pagados:0};tables.suscripciones.push(s);}
@@ -88,7 +91,7 @@ try {
  const chrome=process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
  if(fs.existsSync(chrome)) options.executablePath=chrome;
  browser=await chromium.launch(options);
- async function abrirPagina(presupuestos,suscripciones=[]){
+ async function abrirPagina(presupuestos,suscripciones=[],perfil=null){
   const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
   page.errores=[];
   page.on('pageerror',e=>page.errores.push(e.message));
@@ -97,7 +100,7 @@ try {
    const u=route.request().url();
    route.fulfill({contentType:'text/javascript',body:u.includes('supabase')?'window.supabase={createClient:()=>window.mockClient};':u.includes('exceljs')?excelJs:''});
   });
-  await page.addInitScript(mock,{presupuestos,suscripciones});
+  await page.addInitScript(mock,{presupuestos,suscripciones,perfil});
   await page.goto(url,{waitUntil:'networkidle'});
   return page;
  }
@@ -108,6 +111,15 @@ try {
  await page.locator('#pl-companies tr').first().waitFor();
  assert.equal(await page.locator('#pl-companies tr').count(),2);
  assert.equal(await page.locator('#company-nav').isVisible(),false);
+ // Colaboradores: el dueño agrega y edita permisos.
+ await page.locator('#pl-team-email').fill('colab@example.test');
+ await page.locator('#pl-team-form input[value="suscripciones"]').check();
+ await page.locator('#pl-team-form button').click();
+ await page.locator('#pl-team-list [data-action="team-save"]').waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.fixture.colaboradores[0].permisos),['suscripciones']);
+ await page.locator('#pl-team-list input[value="acceso"]').check();
+ await page.locator('#pl-team-list [data-action="team-save"]').click();
+ await page.waitForFunction(()=>window.fixture.colaboradores[0].permisos.length===2);
  await page.locator('#pl-search').fill('segura');
  assert.equal(await page.locator('#pl-companies tr').count(),1);
  await page.locator('[data-action="detail"]').click();
@@ -144,6 +156,21 @@ try {
  assert.equal(await page.evaluate(()=>Plataforma.navegarPermitido('tab-superadmin')),false);
  assert.deepEqual(page.errores,[]);
  await page.close();
+
+ // ── Colaborador sin empresa: solo el panel, con formularios según sus permisos ──
+ const pc=await abrirPagina([],[],{id:'11111111-1111-4111-8111-111111111111',empresa_id:null,rol:'miembro',es_superadmin:false,colaborador_plataforma:true,permisos_plataforma:['suscripciones']});
+ await pc.locator('#pl-companies tr').first().waitFor();
+ assert.equal(await pc.locator('#pl-switch').isVisible(),false);
+ assert.equal(await pc.locator('#company-nav').isVisible(),false);
+ assert.equal(await pc.locator('#pl-team-form').count(),0);
+ await pc.locator('.pl-mine').getByText('Suscripciones y pagos').waitFor();
+ await pc.locator('[data-action="detail"]').last().click();
+ await pc.locator('#pl-subscription-form').waitFor();
+ assert.equal(await pc.locator('#pl-access-form').count(),0);
+ assert.equal(await pc.locator('#pl-delete-form').count(),0);
+ assert.equal(await pc.evaluate(()=>Plataforma.navegarPermitido('tab-nuevo')),false);
+ assert.deepEqual(pc.errores,[]);
+ await pc.close();
 
  // ── Ejecución de proyecto ──
  const pp=await abrirPagina([presupuesto]);

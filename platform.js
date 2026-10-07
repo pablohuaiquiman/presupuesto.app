@@ -9,6 +9,11 @@ const Plataforma = (() => {
     let disponible = false, acceso = null, modo = 'empresa', empresas = [], suscripciones = [], pagos = [];
     let seleccion = null, consulta = 0, timer = null, iniciado = false;
     const $ = id => document.getElementById(id);
+    // Dueño: todo. Colaborador: ve el panel y actúa según sus permisos (el servidor los vuelve a validar).
+    const PERMISOS = {acceso:'Acceso y cupos', suscripciones:'Suscripciones y pagos'};
+    const esDueno = () => !!miPerfil?.es_superadmin;
+    const esEquipo = () => esDueno() || !!miPerfil?.colaborador_plataforma;
+    const puede = permiso => esDueno() || (esEquipo() && (miPerfil.permisos_plataforma || []).includes(permiso));
     const h = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const clp = value => new Intl.NumberFormat('es-CL', {style:'currency', currency:'CLP', maximumFractionDigits:0}).format(value || 0);
     function hoyChile() {
@@ -58,7 +63,13 @@ const Plataforma = (() => {
         }
     }
     async function resolverSesion() {
-        if (!supa || !empresaActual) return;
+        if (!supa) return;
+        if (!empresaActual) {
+            // Colaborador sin empresa: solo existe si la migración de plataforma está aplicada.
+            disponible=esEquipo();
+            acceso={operativo:false};
+            return;
+        }
         const {data,error} = await supa.rpc('estado_servicio',{p_empresa_id:empresaActual.id});
         if (error) {
             if (!disponible && ['PGRST202','42883'].includes(error.code)) {
@@ -79,20 +90,21 @@ const Plataforma = (() => {
     }
     function puedeOperar() { return acceso?.operativo === true; }
     function navegarPermitido(tab) {
-        if (tab === 'tab-superadmin') return !!miPerfil?.es_superadmin;
+        if (tab === 'tab-superadmin') return esEquipo();
+        if (!empresaActual) return false;
         if (tab === 'tab-suscripcion') return true;
         return !disponible || puedeOperar();
     }
     async function iniciar() {
-        $('pl-switch').classList.toggle('hidden',!miPerfil?.es_superadmin);
+        $('pl-switch').classList.toggle('hidden',!esEquipo() || !empresaActual);
         $('nav-superadmin').classList.add('hidden');
         $('nav-suscripcion').classList.toggle('hidden', !disponible);
         $('form-empresa').querySelectorAll('input,button,select,textarea').forEach(el => el.disabled = miPerfil?.rol !== 'admin');
         iniciado=true;
-        cambiarModo(miPerfil?.es_superadmin ? 'admin' : 'empresa');
+        cambiarModo(esEquipo() ? 'admin' : 'empresa');
         clearInterval(timer);
-        if (disponible) timer=setInterval(() => actualizarAcceso().catch(() => {}),60000);
-        if (disponible) retornoMercadoPago();
+        if (disponible && empresaActual) timer=setInterval(() => actualizarAcceso().catch(() => {}),60000);
+        if (disponible && empresaActual) retornoMercadoPago();
     }
     async function actualizarAcceso() {
         try {
@@ -118,15 +130,22 @@ const Plataforma = (() => {
         aplicarBranding();
     }
     function cambiarModo(nuevo) {
-        if (nuevo === 'admin' && !miPerfil?.es_superadmin) return;
+        if (nuevo === 'admin' && !esEquipo()) return;
+        if (nuevo === 'empresa' && !empresaActual) return;
         modo=nuevo;
         ajustarNavegacion();
         mostrarTab(modo === 'admin' ? 'tab-superadmin' : (puedeOperar() || !disponible ? 'tab-nuevo' : 'tab-suscripcion'));
     }
     async function cargarAdmin() {
-        if (!miPerfil?.es_superadmin) return;
+        if (!esEquipo()) return;
         const root=$('pl-admin');
         root.innerHTML='<p class="pl-empty" role="status">Cargando empresas…</p>';
+        if (disponible && !esDueno()) {
+            // Los permisos pueden haber cambiado desde que inició sesión.
+            const {data}=await supa.from('perfiles').select('colaborador_plataforma,permisos_plataforma').eq('id',miPerfil.id).maybeSingle();
+            Object.assign(miPerfil,data || {colaborador_plataforma:false,permisos_plataforma:[]});
+            if (!esEquipo()) { root.innerHTML='<div class="pl-notice" role="alert">Ya no tienes acceso a la administración de la plataforma.</div>'; return; }
+        }
         if (!disponible) {
             root.innerHTML='<div class="pl-notice"><h2>Actualización de base de datos pendiente</h2><p>La administración de suscripciones estará disponible cuando se aplique la migración de plataforma. Las empresas existentes mantienen su funcionamiento.</p></div>';
             return;
@@ -142,6 +161,16 @@ const Plataforma = (() => {
                 '<div class="pl-card"><div class="pl-filters"><label class="pl-field">Buscar empresa<input id="pl-search" type="search" placeholder="Nombre, RUT o correo"></label><label class="pl-field">Acceso<select id="pl-filter-access"><option value="">Todos</option>'+estados('')+'</select></label><label class="pl-field">Suscripción<select id="pl-filter-pay"><option value="">Todas</option>'+['sin_configurar','programada','al_dia','en_gracia','vencida','cancelada'].map(s => opcion(s,etiquetas[s],false)).join('')+'</select></label></div><div class="pl-table-wrap"><table class="pl-table pl-table-cards"><thead><tr><th>Empresa</th><th>Acceso</th><th>Suscripción</th><th>Usuarios</th><th>Vencimiento</th><th></th></tr></thead><tbody id="pl-companies"></tbody></table></div><p id="pl-result-count" class="pl-footnote" aria-live="polite"></p></div>';
             ['pl-search','pl-filter-access','pl-filter-pay'].forEach(id => $(id).addEventListener('input',renderEmpresas));
             renderEmpresas();
+            if (esDueno()) {
+                root.insertAdjacentHTML('beforeend','<div class="pl-card pl-padding pl-team"><div class="pl-heading"><div><h3>Colaboradores de la plataforma</h3><p>Personas que te ayudan a administrar. Todas pueden ver las empresas; marca qué más pueden hacer. Solo tú eliminas empresas y gestionas colaboradores.</p></div></div><div id="pl-team-list"><p class="pl-empty">Cargando colaboradores…</p></div>'+
+                    '<form id="pl-team-form" class="pl-form">'+campo('Correo del colaborador','pl-team-email','email','','required maxlength="254"')+campo('Nombre (opcional)','pl-team-name','text','','maxlength="120"')+
+                    '<div class="pl-wide pl-perms">'+casillas('pl-team-new',[])+'</div><button class="pl-button pl-primary" type="submit">Agregar colaborador</button></form></div>');
+                $('pl-team-form').addEventListener('submit',agregarColaborador);
+                cargarColaboradores();
+            } else {
+                const mios=(miPerfil.permisos_plataforma || []).map(p => PERMISOS[p]).join(' · ') || 'Solo lectura';
+                root.insertAdjacentHTML('afterbegin','<p class="pl-notice pl-mine">Eres colaborador de la plataforma. Tus permisos: <strong>'+h(mios)+'</strong>.</p>');
+            }
         } catch(error) {
             root.innerHTML='<div class="pl-notice" role="alert">No se pudo cargar la administración: '+h(error.message)+' <button class="pl-button" data-action="refresh">Reintentar</button></div>';
         }
@@ -162,6 +191,54 @@ const Plataforma = (() => {
             return '<tr><td data-label="Empresa"><strong>'+nombre+'</strong><small>'+contacto+'</small></td><td data-label="Acceso">'+accesoBadge+'</td><td data-label="Suscripción">'+pagoBadge+'<small>'+plan+'</small></td><td data-label="Usuarios">'+usados+' / '+e.limite_usuarios+'</td><td data-label="Vencimiento">'+fecha(r.vencimiento)+'</td><td class="pl-actions"><button class="pl-button" data-action="detail" data-id="'+h(e.id)+'">Gestionar</button></td></tr>';
         }).join('') || '<tr><td colspan="6" class="pl-empty">No hay empresas que coincidan con los filtros.</td></tr>';
         $('pl-result-count').textContent=filtradas.length+' de '+empresas.length+' empresas · Moneda de suscripciones: CLP';
+    }
+    const casillas = (prefijo,activos) => Object.entries(PERMISOS).map(([valor,label]) =>
+        '<label class="pl-check"><input type="checkbox" name="'+prefijo+'" value="'+valor+'"'+(activos.includes(valor) ? ' checked' : '')+'> '+h(label)+'</label>').join('');
+    const marcados = scope => [...scope.querySelectorAll('input[type=checkbox]:checked')].map(el => el.value);
+    async function cargarColaboradores() {
+        const lista=$('pl-team-list');
+        const {data:filas,error}=await supa.rpc('plataforma_listar_colaboradores');
+        if (!lista) return;
+        if (error) { lista.innerHTML='<p class="pl-notice" role="alert">No se pudieron cargar los colaboradores: '+h(error.message)+'</p>'; return; }
+        const data=filas || [];
+        lista.innerHTML=data.length ? '<div class="pl-table-wrap"><table class="pl-table pl-table-cards"><thead><tr><th>Colaborador</th><th>Permisos</th><th></th></tr></thead><tbody>'+
+            data.map(c => '<tr data-id="'+h(c.id)+'"><td data-label="Colaborador"><strong>'+h(c.nombre || c.email)+'</strong><small>'+h(c.email)+(c.empresa ? ' · '+h(c.empresa) : ' · Sin empresa')+'</small></td>'+
+                '<td data-label="Permisos"><div class="pl-perms"><span class="pl-badge">Ver empresas</span>'+casillas('pl-perm-'+h(c.id),c.permisos || [])+'</div></td>'+
+                '<td class="pl-actions"><button class="pl-button" data-action="team-save" data-id="'+h(c.id)+'">Guardar permisos</button> <button class="pl-button pl-danger" data-action="team-remove" data-id="'+h(c.id)+'" data-name="'+h(c.nombre || c.email)+'">Quitar</button></td></tr>').join('')+
+            '</tbody></table></div>' : '<p class="pl-empty">Todavía no tienes colaboradores.</p>';
+    }
+    async function agregarColaborador(event) {
+        event.preventDefault();
+        const form=event.currentTarget;
+        if (form.dataset.busy) return;
+        const email=$('pl-team-email').value.trim(), nombre=$('pl-team-name').value.trim(), permisos=marcados(form);
+        form.dataset.busy='true';
+        form.querySelectorAll('button').forEach(b => b.disabled=true);
+        try {
+            const {data,error}=await supa.rpc('plataforma_agregar_colaborador',{p_email:email,p_permisos:permisos});
+            if (error) throw error;
+            if (data==='sin_cuenta') {
+                const r=await supa.functions.invoke('invitar-usuario',{body:{email,nombre,colaborador:true,permisos}});
+                if (r.error || r.data?.error) throw new Error(r.data?.error || r.error.message);
+                toast('Invitación enviada a '+email,'success');
+            } else toast(email+' ahora es colaborador','success');
+            form.reset();
+            await cargarColaboradores();
+        } catch(error) { toast('No se pudo agregar: '+error.message,'error'); }
+        finally { delete form.dataset.busy; form.querySelectorAll('button').forEach(b => b.disabled=false); }
+    }
+    async function accionColaborador(button) {
+        const id=button.dataset.id, fila=button.closest('tr');
+        const quitar=button.dataset.action==='team-remove';
+        if (quitar && !confirm('¿Quitar a '+button.dataset.name+' como colaborador? Perderá el acceso a la administración de la plataforma.')) return;
+        button.disabled=true;
+        const {error}=quitar
+            ? await supa.rpc('plataforma_quitar_colaborador',{p_usuario:id})
+            : await supa.rpc('plataforma_permisos_colaborador',{p_usuario:id,p_permisos:marcados(fila)});
+        button.disabled=false;
+        if (error) return toast('No se pudo guardar: '+error.message,'error');
+        toast(quitar ? 'Colaborador quitado' : 'Permisos actualizados','success');
+        await cargarColaboradores();
     }
     function tablaPagos(rows) {
         if (!rows.length) return '<p class="pl-empty">Todavía no hay pagos registrados.</p>';
@@ -234,26 +311,32 @@ const Plataforma = (() => {
                 campo('Referencia única de transferencia','pl-reference','text','','required maxlength="160"')+
                 campo('Fecha del pago','pl-payment-date','date',hoyChile(),'required min="2020-01-01" max="'+hoyChile()+'"')+
                 '<input type="hidden" id="pl-payment-amount" value="'+s.monto_mensual+'"><button class="pl-button pl-primary" type="submit">Confirmar pago recibido</button></form>';
-            const eliminar=e.estado_acceso==='archivada' ? '<section class="pl-section"><h3>Eliminar empresa sin actividad</h3><p class="pl-footnote">Solo se permite si no tiene presupuestos, órdenes ni pagos. Se eliminan sus perfiles de empresa; se conserva el historial administrativo y las cuentas de acceso.</p><form id="pl-delete-form" class="pl-form">'+campo('Escribe el nombre exacto de la empresa','pl-delete-name','text','','required')+'<button class="pl-button pl-danger" type="submit">Eliminar definitivamente</button></form></section>' : '';
-            $('pl-detail').innerHTML='<p class="pl-eyebrow">FICHA DE EMPRESA</p><h2 id="pl-dialog-title">'+h(e.nombre_comercial)+'</h2><p>'+h([e.rut,e.email_contacto,e.telefono].filter(Boolean).join(' · ') || 'Sin contacto registrado')+'</p>'+
-                '<div class="pl-status-line">'+badge(e.estado_acceso)+badge(r.estado_pago)+'</div>'+
-                '<section class="pl-section"><h3>Acceso y usuarios</h3><form id="pl-access-form" class="pl-form"><label class="pl-field">Estado de acceso<select id="pl-access">'+estadoOpciones+'</select></label>'+
+            const sinPermiso='<p class="pl-empty">No tienes permiso para modificar esta sección.</p>';
+            const eliminar=esDueno() && e.id!==empresaActual?.id ? '<section class="pl-section"><h3>Eliminar empresa</h3><p class="pl-footnote">Borra definitivamente la empresa con todos sus presupuestos, órdenes de trabajo, proyectos, archivos, suscripción y pagos. Sus usuarios conservan su cuenta y pueden volver a crear la empresa desde cero. Queda registro en el historial administrativo. <strong>No se puede deshacer.</strong></p><form id="pl-delete-form" class="pl-form">'+campo('Escribe el nombre exacto de la empresa','pl-delete-name','text','','required autocomplete="off"')+'<button class="pl-button pl-danger" type="submit">Eliminar definitivamente</button></form></section>' : '';
+            const accesoForm=puede('acceso') ? '<form id="pl-access-form" class="pl-form"><label class="pl-field">Estado de acceso<select id="pl-access">'+estadoOpciones+'</select></label>'+
                 campo('Motivo del cambio','pl-reason','text','','required minlength="5" maxlength="500"')+
-                '<button class="pl-button" type="submit">Guardar acceso</button></form><p class="pl-footnote">Archivar da de baja la empresa y conserva sus documentos e historial.</p><form id="pl-quota-form" class="pl-inline">'+campo('Cupo de usuarios','pl-quota','number',e.limite_usuarios,'required min="1" max="10000" step="1"')+'<button class="pl-button" type="submit">Guardar cupo</button></form></section>'+
-                '<section class="pl-section"><h3>Suscripción mensual</h3><p class="pl-footnote">La primera mensualidad vence en la fecha de inicio. El acceso por deuda se restringe al terminar los días de gracia. Los cambios de precio se aplican al siguiente pago que registres.</p><form id="pl-subscription-form" class="pl-form">'+
+                '<button class="pl-button" type="submit">Guardar acceso</button></form><p class="pl-footnote">Archivar da de baja la empresa y conserva sus documentos e historial.</p><form id="pl-quota-form" class="pl-inline">'+campo('Cupo de usuarios','pl-quota','number',e.limite_usuarios,'required min="1" max="10000" step="1"')+'<button class="pl-button" type="submit">Guardar cupo</button></form>'
+                : '<p>Cupo de usuarios: <strong>'+h(e.limite_usuarios)+'</strong></p>'+sinPermiso;
+            const suscripcionForm=puede('suscripciones') ? '<form id="pl-subscription-form" class="pl-form">'+
                 campo('Nombre del plan','pl-plan','text',s?.plan_nombre || 'Mensual','required maxlength="80"')+
                 campo('Precio mensual (CLP)','pl-price','number',s?.monto_mensual || '','required min="1" max="2147483647" step="1"')+
                 campo('Inicio del ciclo','pl-start','date',s?.inicio || hoyChile(),'required min="2020-01-01"'+fechaBloqueada)+
                 campo('Días de gracia','pl-grace','number',s?.dias_gracia ?? 5,'required min="0" max="30" step="1"')+
-                '<label class="pl-check"><input id="pl-cancelled" type="checkbox"'+(s?.cancelada ? ' checked' : '')+'> Cancelar renovación (conserva el tiempo pagado)</label><button class="pl-button pl-primary" type="submit">Guardar suscripción</button></form></section>'+
+                '<label class="pl-check"><input id="pl-cancelled" type="checkbox"'+(s?.cancelada ? ' checked' : '')+'> Cancelar renovación (conserva el tiempo pagado)</label><button class="pl-button pl-primary" type="submit">Guardar suscripción</button></form>'
+                : (s ? '<p>Plan <strong>'+h(s.plan_nombre)+'</strong> · '+clp(s.monto_mensual)+' · inicio '+fecha(s.inicio)+' · '+s.dias_gracia+' días de gracia'+(s.cancelada ? ' · renovación cancelada' : '')+'</p>' : '<p>Sin suscripción configurada.</p>')+sinPermiso;
+            if (!puede('suscripciones')) pagoForm=sinPermiso;
+            $('pl-detail').innerHTML='<p class="pl-eyebrow">FICHA DE EMPRESA</p><h2 id="pl-dialog-title">'+h(e.nombre_comercial)+'</h2><p>'+h([e.rut,e.email_contacto,e.telefono].filter(Boolean).join(' · ') || 'Sin contacto registrado')+'</p>'+
+                '<div class="pl-status-line">'+badge(e.estado_acceso)+badge(r.estado_pago)+'</div>'+
+                '<section class="pl-section"><h3>Acceso y usuarios</h3>'+accesoForm+'</section>'+
+                '<section class="pl-section"><h3>Suscripción mensual</h3><p class="pl-footnote">La primera mensualidad vence en la fecha de inicio. El acceso por deuda se restringe al terminar los días de gracia. Los cambios de precio se aplican al siguiente pago que registres.</p>'+suscripcionForm+'</section>'+
                 '<section class="pl-section"><h3>Registrar mensualidad</h3>'+pagoForm+'</section>'+
                 '<section class="pl-section"><h3>Últimos 100 pagos</h3>'+tablaPagos(pr.data)+'</section>'+
                 '<section class="pl-section"><h3>Cobros con Mercado Pago</h3>'+(revision ? '<p class="pl-notice" role="alert">'+revision+' pago(s) aprobados en Mercado Pago no coinciden con la suscripción vigente. Verifícalos y regístralos manualmente si corresponde.</p>' : '')+tablaCobrosMp(cobros)+'</section>'+
                 '<section class="pl-section"><h3>Últimos 50 movimientos administrativos</h3><ul class="pl-history">'+hr.data.map(x => '<li><strong>'+h(x.accion)+'</strong> · '+fecha(x.creado_en)+'<small>'+h(JSON.stringify(x.detalle))+'</small><small>'+(x.actor ? 'Administrador: '+h(x.actor) : 'Automático (Mercado Pago)')+'</small></li>').join('')+'</ul></section>'+eliminar;
             $('pl-delete-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_eliminar_empresa',{p_empresa_id:id,p_nombre:$('pl-delete-name').value},true));
-            $('pl-access-form').addEventListener('submit',event => accionFormulario(event,'plataforma_cambiar_acceso',{p_empresa_id:id,p_estado:$('pl-access').value,p_motivo:$('pl-reason').value},true));
-            $('pl-quota-form').addEventListener('submit',event => accionFormulario(event,'set_limite_usuarios',{p_empresa_id:id,p_limite:Number($('pl-quota').value)}));
-            $('pl-subscription-form').addEventListener('submit',event => accionFormulario(event,'plataforma_configurar_suscripcion',{p_empresa_id:id,p_plan:$('pl-plan').value,p_monto:Number($('pl-price').value),p_inicio:$('pl-start').value,p_gracia:Number($('pl-grace').value),p_cancelada:$('pl-cancelled').checked},true));
+            $('pl-access-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_cambiar_acceso',{p_empresa_id:id,p_estado:$('pl-access').value,p_motivo:$('pl-reason').value},true));
+            $('pl-quota-form')?.addEventListener('submit',event => accionFormulario(event,'set_limite_usuarios',{p_empresa_id:id,p_limite:Number($('pl-quota').value)}));
+            $('pl-subscription-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_configurar_suscripcion',{p_empresa_id:id,p_plan:$('pl-plan').value,p_monto:Number($('pl-price').value),p_inicio:$('pl-start').value,p_gracia:Number($('pl-grace').value),p_cancelada:$('pl-cancelled').checked},true));
             $('pl-payment-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_registrar_pago',{p_id:event.currentTarget.dataset.paymentId,p_empresa_id:id,p_periodo_inicio:event.currentTarget.dataset.period,p_monto:Number($('pl-payment-amount').value),p_referencia:$('pl-reference').value,p_fecha_pago:$('pl-payment-date').value},true));
         } catch(error) {
             if (token===consulta) $('pl-detail').innerHTML='<p role="alert">No se pudo cargar la ficha: '+h(error.message)+'</p>';
@@ -263,7 +346,7 @@ const Plataforma = (() => {
         event.preventDefault();
         const form=event.currentTarget;
         if (form.dataset.busy) return;
-        if (confirmar && !confirm(rpc==='plataforma_registrar_pago' ? '¿Confirmas que verificaste el pago de '+clp(args.p_monto)+' para el período que inicia el '+fecha(args.p_periodo_inicio)+'?' : (rpc==='plataforma_eliminar_empresa' ? '¿Eliminar definitivamente esta empresa sin actividad? Esta acción no se puede deshacer.' : '¿Confirmas este cambio? Puede modificar el acceso de la empresa.'))) return;
+        if (confirmar && !confirm(rpc==='plataforma_registrar_pago' ? '¿Confirmas que verificaste el pago de '+clp(args.p_monto)+' para el período que inicia el '+fecha(args.p_periodo_inicio)+'?' : (rpc==='plataforma_eliminar_empresa' ? '¿Eliminar definitivamente "'+args.p_nombre+'" con TODOS sus presupuestos, órdenes, proyectos y pagos? Esta acción no se puede deshacer.' : '¿Confirmas este cambio? Puede modificar el acceso de la empresa.'))) return;
         form.dataset.busy='true';
         form.querySelectorAll('button').forEach(b => b.disabled=true);
         try {
@@ -272,7 +355,7 @@ const Plataforma = (() => {
             if (rpc==='plataforma_eliminar_empresa') $('pl-dialog').close();
             toast('Cambio guardado','success');
             await cargarAdmin();
-            if (args.p_empresa_id===empresaActual.id) await actualizarAcceso();
+            if (empresaActual && args.p_empresa_id===empresaActual.id) await actualizarAcceso();
             if ($('pl-dialog').open && seleccion===args.p_empresa_id) await abrirFicha(args.p_empresa_id);
         } catch(error) { toast('No se pudo guardar: '+error.message,'error'); }
         finally { delete form.dataset.busy; form.querySelectorAll('button').forEach(b => b.disabled=false); }
@@ -314,6 +397,7 @@ const Plataforma = (() => {
         if (action==='detail') abrirFicha(button.dataset.id);
         if (action==='subscription-refresh') cargarMiSuscripcion();
         if (action==='mp-pagar') pagarMercadoPago(button);
+        if (action==='team-save' || action==='team-remove') accionColaborador(button);
     });
     return {resolverSesion,iniciar,puedeOperar,navegarPermitido,cambiarModo,cargarAdmin,cargarMiSuscripcion,
         get disponible(){return disponible;},

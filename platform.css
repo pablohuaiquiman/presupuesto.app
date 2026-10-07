@@ -81,4 +81,9 @@
 }
 
 .pl-danger { border-color:#fca5a5; color:#b91c1c; }
+.pl-team { margin-top:24px; }
+.pl-team .pl-heading { margin-bottom:12px; }
+.pl-team .pl-form { margin-top:20px; }
+.pl-perms { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
+.pl-mine { margin-bottom:20px; padding:14px 18px; }
 @media print { #tab-superadmin,#tab-suscripcion,#pl-switch,#pl-dialog { display:none !important; } }

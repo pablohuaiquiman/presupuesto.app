@@ -272,8 +272,11 @@ const Proyectos = (() => {
     function fichaHtml(pr) {
         const p = presupuestoDe(pr);
         if (!p) return `<div class="bg-white rounded-2xl border p-8 text-center"><p class="font-semibold">No se encontró el presupuesto de este proyecto.</p>${btn('Volver', 'Proyectos.volver()', 'bg-slate-700 text-white mt-3')}</div>`;
-        const pestañas = [['resumen', 'Resumen'], ['presupuesto', 'Presupuesto y OT'], ['edps', 'Estados de pago'], ['gastos', 'Gastos'], ['config', 'Configuración']];
-        const cuerpo = { resumen: resumenHtml, presupuesto: presupuestoHtml, edps: edpsHtml, gastos: gastosHtml, config: configHtml }[vista] || resumenHtml;
+        const conCompras = typeof Compras !== 'undefined' && Compras.disponible;
+        const pestañas = [['resumen', 'Resumen'], ['presupuesto', 'Presupuesto y OT'], ['edps', 'Estados de pago'], ['gastos', 'Gastos'],
+            ...(conCompras ? [['compras', 'Órdenes de compra']] : []), ['config', 'Configuración']];
+        const cuerpo = { resumen: resumenHtml, presupuesto: presupuestoHtml, edps: edpsHtml, gastos: gastosHtml, config: configHtml,
+            compras: conCompras ? pr => Compras.htmlProyecto(pr) : null }[vista] || resumenHtml;
         return `<div class="space-y-4">
             <div class="bg-gradient-to-r from-slate-900 to-slate-700 rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3 justify-between">
                 <div class="min-w-0"><button type="button" onclick="Proyectos.volver()" class="text-slate-300 hover:text-white text-xs font-semibold">← Todos los proyectos</button>
@@ -736,7 +739,8 @@ const Proyectos = (() => {
     function configHtml(pr, p) {
         const g = gestiona(pr), c = pr.config || {}, f = c.firmantes || {};
         const dis = g ? '' : 'disabled';
-        const lista = edpsDe(pr.id), vacio = !lista.length && !gastosDe(pr.id).length;
+        const lista = edpsDe(pr.id), vacio = !lista.length && !gastosDe(pr.id).length
+            && !(typeof Compras !== 'undefined' && Compras.deProyecto(pr.id).length);
         return tarjeta('Configuración del proyecto', `<form onsubmit="Proyectos.guardarConfig(event)" class="space-y-5">
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 ${campo('Nombre / obra', `<input id="pr-c-nombre" required maxlength="160" class="campo-input mt-1" value="${h(pr.nombre)}" ${dis}>`)}
@@ -1023,11 +1027,16 @@ const Proyectos = (() => {
     // ── Navegación ────────────────────────────────────────
     function abrir(id, nuevaVista = 'resumen', edpId = null) {
         actualId = id; vista = nuevaVista; edpSelId = null; cantidades = null; rechazandoId = null;
+        if (nuevaVista === 'compras') Compras.reiniciar();
         if (edpId) return seleccionarEdp(edpId);
         render();
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    function cambiarVista(v) { vista = v; rechazandoId = null; render(); }
+    function cambiarVista(v) {
+        vista = v; rechazandoId = null;
+        if (v === 'compras') Compras.reiniciar();
+        render();
+    }
     function volver() { actualId = null; edpSelId = null; cantidades = null; render(); }
 
     return {
@@ -1035,6 +1044,10 @@ const Proyectos = (() => {
         seleccionarEdp, editarAvance, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
         guardarFacturacion, registrarPago, registrarGasto, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
+        // Para el módulo de órdenes de compra (compras.js)
+        gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,
+        agregarGasto: fila => reemplazar(gastos, fila),
+        get lista() { return proyectos; },
         get disponible() { return disponible; },
         test: { calcularEDP, calcularDevolucion, diasEntre, redondear },
     };
