@@ -566,6 +566,34 @@
             <p class="text-xs mt-1">Aprueba un presupuesto desde "Enviados"</p>
         </div>
 
+        <!-- Rechazados (archivo) -->
+        <details id="rechazados-section" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <summary class="cursor-pointer select-none px-6 py-4 bg-slate-50 hover:bg-slate-100 flex items-center justify-between">
+                <span>
+                    <span class="text-slate-700 font-bold">Presupuestos rechazados</span>
+                    <span id="rechazados-count" class="ml-2 bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded-full">0</span>
+                    <span class="block text-slate-400 text-xs mt-0.5">Archivados · puedes reactivarlos para volver a "Enviados"</span>
+                </span>
+                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </summary>
+            <div class="p-4 sm:p-6">
+                <div class="overflow-x-auto rounded-xl border border-slate-200">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-100 text-slate-500 uppercase text-xs">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold">N° Presupuesto</th>
+                                <th class="px-4 py-3 text-left font-semibold">Cliente / Motivo</th>
+                                <th class="px-4 py-3 text-left font-semibold hidden sm:table-cell">Rechazado</th>
+                                <th class="px-4 py-3 text-right font-semibold">Total</th>
+                                <th class="px-4 py-3 text-center font-semibold">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rechazados-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </details>
+
     </section>
 
     <!-- ══ TAB 4 · FIRMA DIGITAL ══ -->

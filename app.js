@@ -1040,8 +1040,10 @@ function renderEnviados() {
                         class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Editar</button>
                     <button onclick="exportarPDF('${p.id}')"
                         class="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors">PDF</button>
-                    <button onclick="abrirModalContrato('${p.id}')"
+                    <button onclick="aprobarPresupuesto('${p.id}')"
                         class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">Aprobar</button>
+                    <button onclick="rechazarPresupuesto('${p.id}')"
+                        class="text-xs px-3 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded-lg font-bold transition-colors">Rechazar</button>
                 </div>
             </td>
         </tr>`;
@@ -1108,7 +1110,25 @@ function actualizarUIModoEdicion() {
 }
 
 // ════════════════════════════════════════════════════════
-// MODAL CONTRATO · FIRMA + CÁMARA FRONTAL
+// APROBACIÓN (la hace el usuario; la firma del cliente se pide después en Adjudicados)
+// ════════════════════════════════════════════════════════
+function aprobarPresupuesto(id) {
+    const p = presupuestos.find(x => x.id === id);
+    if (!p || p.estado !== 'enviado') return;
+    if (!confirm(`¿Aprobar ${p.numero} (${p.cliente.nombre})?\nPasará a "Adjudicados", donde podrás solicitar la firma del cliente.`)) return;
+
+    p.estado = 'adjudicado';
+    p.fechaAdjudicacion = new Date().toISOString().slice(0,10);
+    p.firma = null;
+    guardarDB();
+    actualizarBadges();
+    renderEnviados();
+    renderAdjudicados();
+    toast(`Presupuesto ${p.numero} adjudicado. Solicita la firma del cliente en "Adjudicados"`, 'success');
+}
+
+// ════════════════════════════════════════════════════════
+// MODAL CONTRATO · FIRMA PRESENCIAL DEL ADJUDICADO + CÁMARA FRONTAL
 // ════════════════════════════════════════════════════════
 function initFirmaContrato() {
     fcCanvas = document.getElementById('firma-contrato-canvas');
@@ -1146,7 +1166,8 @@ function limpiarFirmaContrato() {
 async function abrirModalContrato(id) {
     const p = presupuestos.find(x => x.id === id);
     if (!p) return;
-    if (p.estado === 'adjudicado') return toast('Este presupuesto ya está adjudicado', 'info');
+    if (p.estado !== 'adjudicado') return toast('Primero aprueba el presupuesto', 'info');
+    if (p.firma) return toast('Este contrato ya está firmado por el cliente', 'info');
     contratoActualId = id;
     monedaFmt = p.moneda || 'CLP';
     decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
@@ -1226,6 +1247,7 @@ function renderAdjudicados() {
     const grid  = document.getElementById('adjudicados-grid');
     const vacio = document.getElementById('adjudicados-vacio');
     vacio.classList.toggle('hidden', lista.length > 0);
+    renderRechazados();
 
     grid.innerHTML = lista.map(p => {
         monedaFmt = p.moneda || 'CLP';
@@ -1299,6 +1321,71 @@ function revertirAdjudicacion(id) {
     renderAdjudicados();
     renderEnviados();
     toast(`Presupuesto ${p.numero} vuelto a Enviados`, 'info');
+}
+
+// ── Rechazados (archivados bajo Adjudicados) ─────────────
+function rechazarPresupuesto(id) {
+    const p = presupuestos.find(x => x.id === id);
+    if (!p || p.estado !== 'enviado') return;
+    const motivo = prompt(`¿Marcar ${p.numero} (${p.cliente.nombre}) como rechazado?\nMotivo (opcional):`, '');
+    if (motivo === null) return;
+
+    p.estado = 'rechazado';
+    p.fechaRechazo = new Date().toISOString().slice(0,10);
+    p.motivoRechazo = motivo.trim();
+    guardarDB();
+    actualizarBadges();
+    renderEnviados();
+    renderAdjudicados();
+    toast(`Presupuesto ${p.numero} archivado como rechazado`, 'info');
+}
+
+function reactivarPresupuesto(id) {
+    const p = presupuestos.find(x => x.id === id);
+    if (!p || p.estado !== 'rechazado') return;
+    if (!confirm(`¿Reactivar ${p.numero}? Volverá a "Enviados".`)) return;
+
+    p.estado = 'enviado';
+    delete p.fechaRechazo;
+    delete p.motivoRechazo;
+    guardarDB();
+    actualizarBadges();
+    renderAdjudicados();
+    renderEnviados();
+    toast(`Presupuesto ${p.numero} vuelto a Enviados`, 'info');
+}
+
+function renderRechazados() {
+    const lista = presupuestos.filter(p => p.estado === 'rechazado')
+        .sort((a, b) => (b.fechaRechazo || '').localeCompare(a.fechaRechazo || ''));
+    const cont  = document.getElementById('rechazados-section');
+    const tbody = document.getElementById('rechazados-tbody');
+    document.getElementById('rechazados-count').textContent = lista.length;
+    cont.classList.toggle('hidden', !lista.length);
+    if (!lista.length) { tbody.innerHTML = ''; return; }
+
+    tbody.innerHTML = lista.map(p => {
+        monedaFmt = p.moneda || 'CLP';
+        decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
+        const c = calcPresupuesto(p);
+        return `<tr class="border-t border-slate-100 hover:bg-red-50/50 transition-colors">
+            <td class="px-4 py-3 font-mono text-xs font-bold text-slate-500">${esc(p.numero)}</td>
+            <td class="px-4 py-3">
+                <p class="font-semibold text-slate-700 text-sm">${esc(p.cliente.nombre)}</p>
+                ${p.motivoRechazo ? `<p class="text-xs text-red-600">${esc(p.motivoRechazo)}</p>` : `<p class="text-xs text-slate-400">${esc(p.cliente.comuna)}</p>`}
+            </td>
+            <td class="px-4 py-3 text-sm text-slate-500 hidden sm:table-cell">${fmtFecha(p.fechaRechazo)}</td>
+            <td class="px-4 py-3 text-right font-bold text-slate-600">${fmt(c.total)}</td>
+            <td class="px-4 py-3">
+                <div class="flex justify-center gap-1.5 flex-wrap">
+                    <button onclick="exportarPDF('${p.id}')"
+                        class="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors">PDF</button>
+                    <button onclick="reactivarPresupuesto('${p.id}')"
+                        class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">↩ Reactivar</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
 }
 
 // ════════════════════════════════════════════════════════
