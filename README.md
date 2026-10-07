@@ -102,6 +102,19 @@ Reglas:
 
 Para activarlo en una base que ya tiene la plataforma: respaldo, ejecutar una vez **supabase/migrations/202610060001_proyectos.sql** y publicar los archivos (incluye proyectos.js). Mientras la migración no exista, la pestaña Proyectos queda oculta.
 
+## Endurecimiento de seguridad (auditoría 06-10-2026)
+
+Cambios de esta versión y cómo activarlos, en este orden:
+
+1. **Base de datos:** respaldo y ejecutar una vez **supabase/migrations/202610070001_seguridad.sql**. El alta de empresa exige sesión, las funciones auxiliares dejan de responder a visitantes sin sesión y la firma pública solo acepta imágenes de tamaño acotado.
+2. **Mercado Pago:** configurar el secreto `MP_WEBHOOK_SECRET` (clave secreta de Webhooks) **antes** de desplegar la función. Desde esta versión es obligatorio: sin él los avisos de pago se rechazan y los pagos en línea no se acreditan solos.
+3. **Funciones:** desplegar `mercadopago` (con `--no-verify-jwt`) e `invitar-usuario`. Ya no devuelven detalles internos de los errores; quedan en el registro de la función.
+4. **Sitio:** publicar los archivos. Las librerías externas quedan con versión fija y verificación de integridad; al subir de versión hay que actualizar también el atributo `integrity`.
+
+Los enlaces de firma nuevos usan un identificador aleatorio largo; los ya emitidos siguen funcionando.
+
+Pendiente fuera del código: activar la confirmación de correo en Supabase Auth (hoy las cuentas se crean sin confirmar el correo) y definir una política de contraseñas.
+
 ## Archivos
 
 - platform.js: panel, ficha, vista de suscripción, estados y actualización de sesión.

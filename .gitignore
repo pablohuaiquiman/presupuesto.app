@@ -6,3 +6,6 @@ backups/
 *.xlsx
 presupuestos pdf/
 formatos estados de pago/
+*.docx
+*.doc
+tests/package-lock.json

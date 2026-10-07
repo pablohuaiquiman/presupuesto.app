@@ -439,7 +439,11 @@ async function cargarSuperadmin() { return Plataforma.cargarAdmin(); }
 // ════════════════════════════════════════════════════════
 // UTILIDADES
 // ════════════════════════════════════════════════════════
-function uid() { return `_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`; }
+// Identificador impredecible: el id de una orden publicada es también su enlace público de firma.
+function uid() {
+    const b = new Uint8Array(16); crypto.getRandomValues(b);
+    return `_${Date.now().toString(36)}${Array.from(b, x => x.toString(16).padStart(2, '0')).join('')}`;
+}
 
 // Moneda / decimales usados por fmt() en el render/formulario actualmente activo.
 let monedaFmt    = 'CLP';
@@ -1622,7 +1626,7 @@ function renderDocumentoRF(ot) {
             <tr class="border-t border-slate-100">
                 <td class="px-3 py-2 text-sm">${esc(it.descripcion)}</td>
                 <td class="px-3 py-2 text-center text-xs text-slate-500">${esc(it.unidad)}</td>
-                <td class="px-3 py-2 text-center text-sm">${it.cantidad}</td>
+                <td class="px-3 py-2 text-center text-sm">${esc(it.cantidad)}</td>
                 <td class="px-3 py-2 text-right text-sm">${fmt(it.precioUnit)}</td>
                 <td class="px-3 py-2 text-right font-semibold">${fmt(it.total)}</td>
             </tr>`).join('');
