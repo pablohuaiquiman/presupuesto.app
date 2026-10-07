@@ -236,6 +236,45 @@ assert.equal(await value("select count(*)::int v from public.perfiles where id i
 assert.equal(await value("select empresa_id is null and colaborador_plataforma v from public.perfiles where id='"+obrero+"'"),true);
 assert.equal(await value("select count(*)::int v from auth.users where id in ('"+jefe+"','"+otro+"')"),2);
 assert.equal(await value("select count(*)::int v from public.plataforma_historial where accion='eliminacion' and detalle->>'nombre' in ('Constructora','Otra')"),2);
+
+// ── Órdenes de compra: aprobación por tramos de monto neto ──
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610070004_ordenes_compra.sql','utf8'));
+await db.exec(fs.readFileSync('supabase/migrations/202610070006_aprobacion_oc.sql','utf8'));
+const f='f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0',ger='a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1',gpro='b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b2b2',adp='c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3',trab='d4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4';
+await db.exec("insert into auth.users values('"+ger+"','ger@test.local'),('"+gpro+"','gpro@test.local'),('"+adp+"','adp@test.local'),('"+trab+"','trab@test.local'); insert into public.empresas(id,nombre_comercial,aprobada,estado_acceso,acceso_transitorio,limite_usuarios) values('"+f+"','Compras SpA',true,'autorizada',true,10); insert into public.perfiles(id,empresa_id,rol) values('"+ger+"','"+f+"','admin'),('"+gpro+"','"+f+"','miembro'),('"+adp+"','"+f+"','miembro'),('"+trab+"','"+f+"','miembro'); insert into public.presupuestos(id,empresa_id,data) values('pf','"+f+"','{}');");
+const pf=await value("insert into public.proyectos(empresa_id,presupuesto_id,codigo,nombre,administrador_id) values('"+f+"','pf','CC-F','Obra F','"+adp+"') returning id v");
+const nuevaOC=async neto=>{await as(trab);return value("insert into public.ordenes_compra(empresa_id,proyecto_id,proveedor,items,totales) values('"+f+"','"+pf+"','{\"nombre\":\"Ferretería\"}','[{\"detalle\":\"x\"}]',jsonb_build_object('neto',"+neto+")) returning id v");};
+const emitir=id=>"update public.ordenes_compra set estado='emitida' where id='"+id+"'";
+// Sin tramos: el administrador del proyecto aprueba cualquier monto; el trabajador no.
+const o0=await nuevaOC(2000000);
+await rejects(emitir(o0),/administrador del proyecto|No te corresponde/);
+await as(adp); await db.exec(emitir(o0));
+// Solo el administrador de la empresa configura, con montos crecientes y designados de la empresa.
+const cfg=(l1,l2,gp,gg)=>"update public.empresas set aprobacion_oc=jsonb_build_object('activo',true,'limite_administrador',"+l1+",'limite_gerente_proyectos',"+l2+",'gerente_proyectos_id','"+gp+"','gerente_general_id','"+gg+"') where id='"+f+"'";
+await as(trab); await db.exec(cfg(1,2,'',''));
+assert.equal(await value("select aprobacion_oc='{}'::jsonb v from public.empresas where id='"+f+"'"),true);
+await as(ger);
+await rejects(cfg(1500000,500000,gpro,ger),/crecientes/);
+await rejects(cfg(500000,1500000,gpro,admin),/pertenecer/);
+await db.exec(cfg(500000,1500000,gpro,ger));
+// Tramo 1 (≤ 500.000): administrador del proyecto.
+const o1=await nuevaOC(500000);
+await as(adp); await db.exec(emitir(o1));
+// Tramo 2 (≤ 1.500.000): gerente de proyectos; el administrador del proyecto ya no.
+const o2=await nuevaOC(500001);
+await as(adp); await rejects(emitir(o2),/No te corresponde/);
+await as(gpro); await db.exec(emitir(o2));
+assert.equal(await value("select aprobado_por::text v from public.ordenes_compra where id='"+o2+"'"),gpro);
+// Tramo 3 (> 1.500.000): solo el gerente general.
+const o3=await nuevaOC(1500001);
+await as(gpro); await rejects(emitir(o3),/No te corresponde/);
+await as(adp); await rejects(emitir(o3),/No te corresponde/);
+await as(ger); await db.exec(emitir(o3));
+// Un nivel superior aprueba montos menores.
+const o4=await nuevaOC(1000);
+await as(gpro); await db.exec(emitir(o4));
+assert.equal(await value("select count(*)::int v from public.ordenes_compra where estado='emitida'"),5);
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) y proyectos (estados de pago, gastos, archivos, aislamiento) correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});

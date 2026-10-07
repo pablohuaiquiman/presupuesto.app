@@ -409,6 +409,7 @@ async function cargarEquipo() {
             </div>
         </div>`).join('');
     document.getElementById('form-invitar').classList.toggle('hidden', miPerfil?.rol !== 'admin');
+    Compras.renderConfig(data);
 }
 
 async function onSubmitInvitar(e) {
@@ -2136,7 +2137,9 @@ function generarPDF(css, bodyHtml, filename) {
         margin: 0,
         filename,
         image: { type: 'jpeg', quality: 1 },
-        html2canvas: { scale: 2.5, useCORS: true },
+        // Sin scrollX/Y en 0, html2canvas desplaza la captura según el scroll de la página
+        // y el PDF sale con una franja en blanco arriba y el final cortado.
+        html2canvas: { scale: 2.5, useCORS: true, scrollX: 0, scrollY: 0 },
         jsPDF: { unit: 'in', format: [anchoIn, altoIn], orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all'] },
     }).from(cont).save().then(() => {

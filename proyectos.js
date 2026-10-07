@@ -1048,6 +1048,7 @@ const Proyectos = (() => {
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,
         agregarGasto: fila => reemplazar(gastos, fila),
         get lista() { return proyectos; },
+        get perfiles() { return perfiles; },
         get disponible() { return disponible; },
         test: { calcularEDP, calcularDevolucion, diasEntre, redondear },
     };

@@ -54,6 +54,34 @@ const Compras = (() => {
     const deProyecto = id => ordenes.filter(o => o.proyecto_id === id);
     const actual = () => ordenes.find(o => o.id === ocId) || null;
     const proyectosActivos = () => Proyectos.lista.filter(p => p.estado === 'activo');
+    // ── Aprobación por tramos de monto neto (la regla real se valida en Supabase: 202610070006_aprobacion_oc.sql) ──
+    const NIVELES = { 1: 'administrador del proyecto', 2: 'gerente de proyectos', 3: 'gerente general' };
+    const configAprobacion = () => ({ activo: false, limite_administrador: 500000, limite_gerente_proyectos: 1500000,
+        gerente_proyectos_id: '', gerente_general_id: '', ...(empresaActual?.aprobacion_oc || {}) });
+    function nivelAprobacion(neto) {
+        const c = configAprobacion();
+        if (!c.activo) return 0;
+        return neto <= c.limite_administrador ? 1 : neto <= c.limite_gerente_proyectos ? 2 : 3;
+    }
+    // Designados que ya no están en la empresa no cuentan (igual que en el servidor).
+    const designado = id => id && Proyectos.perfiles.some(p => p.id === id) ? id : null;
+    function puedeAprobar(o, pr) {
+        if (!pr) return false;
+        const yo = miPerfil?.id, admin = miPerfil?.rol === 'admin', nivel = nivelAprobacion(o.totales?.neto || 0);
+        if (!nivel) return Proyectos.gestiona(pr);
+        const c = configAprobacion(), gp = designado(c.gerente_proyectos_id), gg = designado(c.gerente_general_id);
+        const n3 = gg ? gg === yo : admin, n2 = n3 || (!!gp && gp === yo);
+        return nivel === 1 ? n2 || admin || pr.administrador_id === yo : nivel === 2 ? n2 : n3;
+    }
+    // Texto de quién debe aprobar, para mostrar al solicitante.
+    function aprobadorRequerido(o, pr) {
+        const nivel = nivelAprobacion(o.totales?.neto || 0);
+        if (!nivel) return `el administrador del proyecto (${Proyectos.nombrePerfil(pr?.administrador_id)})`;
+        const c = configAprobacion(), gp = designado(c.gerente_proyectos_id), gg = designado(c.gerente_general_id);
+        const nombre = nivel === 1 ? Proyectos.nombrePerfil(pr?.administrador_id) : nivel === 2 ? (gp ? Proyectos.nombrePerfil(gp) : gg ? Proyectos.nombrePerfil(gg) : 'administrador de la empresa') : (gg ? Proyectos.nombrePerfil(gg) : 'administrador de la empresa');
+        return `el ${NIVELES[nivel]} (${nombre}) por un neto de ${fmtCLP(o.totales?.neto)}`;
+    }
+
     function reemplazar(fila) {
         const i = ordenes.findIndex(x => x.id === fila.id);
         if (i >= 0) ordenes[i] = fila; else ordenes.push(fila);
@@ -122,7 +150,7 @@ const Compras = (() => {
         const suma = f => base.filter(f).reduce((s, o) => s + (o.totales?.total || 0), 0);
         const kpi = (label, valor, nota, tono) => `<div class="rounded-xl border p-3 ${tono}"><p class="text-xs opacity-75 font-medium">${label}</p><p class="text-lg font-black mt-0.5">${valor}</p><p class="text-xs opacity-70 mt-0.5">${nota}</p></div>`;
         const kpis = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            ${kpi('Borradores por emitir', base.filter(o => o.estado === 'borrador').length, fmtCLP(suma(o => o.estado === 'borrador')), 'bg-slate-50 border-slate-200 text-slate-800')}
+            ${kpi('Pendientes de aprobación', base.filter(o => o.estado === 'borrador').length, fmtCLP(suma(o => o.estado === 'borrador')), 'bg-slate-50 border-slate-200 text-slate-800')}
             ${kpi('Emitidas por recibir', base.filter(o => o.estado === 'emitida').length, fmtCLP(suma(o => o.estado === 'emitida')), 'bg-blue-50 border-blue-200 text-blue-800')}
             ${kpi('Sin cargar a gastos', base.filter(o => ['emitida', 'recibida'].includes(o.estado) && !o.gasto_id).length, fmtCLP(suma(o => ['emitida', 'recibida'].includes(o.estado) && !o.gasto_id)), 'bg-amber-50 border-amber-200 text-amber-800')}
             ${kpi('Cargadas a gastos', base.filter(o => o.gasto_id).length, fmtCLP(suma(o => o.gasto_id)), 'bg-emerald-50 border-emerald-200 text-emerald-800')}
@@ -141,7 +169,7 @@ const Compras = (() => {
                 ${enProyecto ? '' : `<td class="px-3 py-2.5"><span class="font-semibold text-slate-700">${h(pr?.codigo || '—')}</span><span class="block text-xs text-slate-400 truncate max-w-[220px]">${h(pr?.nombre || '')}</span></td>`}
                 <td class="px-3 py-2.5 font-semibold text-slate-800">${h(o.proveedor?.nombre)}</td>
                 <td class="px-3 py-2.5 text-right font-bold whitespace-nowrap">${fmtCLP(o.totales?.total)}</td>
-                <td class="px-3 py-2.5">${chip(ESTADOS[o.estado], COLOR[o.estado])}${o.gasto_id ? `<span class="block text-xs text-emerald-700 font-semibold mt-1">✔ En gastos</span>` : ''}</td>
+                <td class="px-3 py-2.5">${chip(ESTADOS[o.estado], COLOR[o.estado])}${o.estado === 'borrador' && puedeAprobar(o, pr) ? `<span class="block text-xs text-blue-700 font-semibold mt-1">Te toca aprobar</span>` : ''}${o.gasto_id ? `<span class="block text-xs text-emerald-700 font-semibold mt-1">✔ En gastos</span>` : ''}</td>
             </tr>`;
         }).join('');
         const puedeCrear = enProyecto ? proyectoDe({ proyecto_id: ctxProyectoId })?.estado === 'activo' : proyectosActivos().length > 0;
@@ -179,10 +207,13 @@ const Compras = (() => {
     }
     function nueva() {
         const proyectoId = ctxProyectoId || (filtroProyecto && proyectosActivos().some(p => p.id === filtroProyecto) ? filtroProyecto : (proyectosActivos().length === 1 ? proyectosActivos()[0].id : ''));
+        // El contacto de despacho se repite de la última OC del proyecto (o la última propia).
+        const previa = ordenarRecientes(ordenes.filter(o => o.despacho?.contacto && (o.proyecto_id === proyectoId || o.solicitado_por === miPerfil?.id)), o => o.fecha)
+            .sort((a, b) => (b.proyecto_id === proyectoId) - (a.proyecto_id === proyectoId))[0]?.despacho || {};
         form = {
             id: null, proyecto_id: proyectoId, fecha: hoyChile(), categoria: 'materiales',
             proveedor: { nombre: '', rut: '', direccion: '', ciudad: '', telefono: '', vendedor: '', email: '' },
-            forma_pago: '', despacho: { direccion: direccionObra(proyectoId), contacto: miPerfil?.nombre || '', fecha_entrega: '' },
+            forma_pago: '', despacho: { direccion: direccionObra(proyectoId), contacto: previa.contacto || miPerfil?.nombre || '', telefono: previa.telefono || '', email: previa.email || '', fecha_entrega: '' },
             items: [itemVacio()], descuento: 0, cargos: 0, iva_pct: 19,
             observaciones: '', numero_externo: '', adjunto_path: null, archivo: null,
         };
@@ -196,7 +227,7 @@ const Compras = (() => {
         form = {
             id: o.id, proyecto_id: o.proyecto_id, fecha: o.fecha, categoria: o.categoria,
             proveedor: { nombre: '', rut: '', direccion: '', ciudad: '', telefono: '', vendedor: '', email: '', ...o.proveedor },
-            forma_pago: o.forma_pago || '', despacho: { direccion: '', contacto: '', fecha_entrega: '', ...o.despacho },
+            forma_pago: o.forma_pago || '', despacho: { direccion: '', contacto: '', telefono: '', email: '', fecha_entrega: '', ...o.despacho },
             items: (o.items || []).map(it => ({ codigo: it.codigo || '', detalle: it.detalle || '', unidad: it.unidad || '', cantidad: +it.cantidad || 0, precio: +it.precio || 0 })),
             descuento: o.totales?.descuento || 0, cargos: o.totales?.cargos || 0, iva_pct: o.totales?.iva_pct ?? 19,
             observaciones: o.observaciones || '', numero_externo: o.numero_externo || '', adjunto_path: o.adjunto_path, archivo: null,
@@ -294,7 +325,7 @@ const Compras = (() => {
             <div class="bg-gradient-to-r from-slate-900 to-slate-700 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-3">
                 <div><button type="button" onclick="Compras.cancelar()" class="text-slate-300 hover:text-white text-xs font-semibold">← Volver</button>
                 <h2 class="text-white text-lg font-bold">${f.id ? `Editar ${numeroOC(ordenes.find(o => o.id === f.id) || { numero: 0 })}` : 'Nueva orden de compra'}</h2>
-                <p class="text-slate-300 text-xs">Se guarda como borrador; el administrador del proyecto la emite.</p></div>
+                <p class="text-slate-300 text-xs">Se guarda como borrador y queda pendiente de aprobación${configAprobacion().activo ? ' según su monto neto' : ' del administrador del proyecto'}.</p></div>
             </div>
             ${tarjeta('Proyecto y condiciones', `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 ${campo('Proyecto (centro de costo)', `<select required onchange="Compras.set('proyecto_id',this.value)" class="campo-input mt-1" ${enProyecto ? 'disabled' : ''}><option value="">— Selecciona —</option>${activos.map(p => `<option value="${p.id}" ${p.id === f.proyecto_id ? 'selected' : ''}>${h(p.codigo)} — ${h(p.nombre)}</option>`).join('')}</select>`, 'sm:col-span-2')}
@@ -320,7 +351,11 @@ const Compras = (() => {
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 ${tarjeta('Despacho y observaciones', `<div class="space-y-3">
                     ${campo('Despachar a', inp('oc-desp-dir', 'despacho.direccion', f.despacho.direccion, 'maxlength="200"'))}
-                    ${campo('Contacto de despacho', inp('oc-desp-contacto', 'despacho.contacto', f.despacho.contacto, 'maxlength="160" placeholder="Nombre y teléfono"'))}
+                    ${campo('Contacto de despacho', inp('oc-desp-contacto', 'despacho.contacto', f.despacho.contacto, 'maxlength="160" placeholder="Nombre de quien recibe"'))}
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        ${campo('Teléfono de contacto', inp('oc-desp-telefono', 'despacho.telefono', f.despacho.telefono, 'type="tel" maxlength="40" placeholder="+56 9 1234 5678"'))}
+                        ${campo('Correo de contacto', inp('oc-desp-email', 'despacho.email', f.despacho.email, 'type="email" maxlength="120" placeholder="correo@empresa.cl"'))}
+                    </div>
                     ${campo('Observaciones / nota al proveedor', `<textarea rows="3" maxlength="1000" oninput="Compras.set('observaciones',this.value)" class="campo-input mt-1">${h(f.observaciones)}</textarea>`)}
                     ${campo('Respaldo (cotización, OC externa o factura · imagen o PDF)', `<input type="file" accept="image/*,application/pdf" onchange="Compras.setArchivo(this.files[0])" class="campo-input mt-1 text-xs">`)}
                     ${f.adjunto_path ? '<p class="text-xs text-slate-500">Ya tiene un respaldo adjunto; si eliges otro archivo, lo reemplaza.</p>' : ''}
@@ -381,13 +416,14 @@ const Compras = (() => {
     // ── Detalle y flujo ───────────────────────────────────
     function detalleHtml(o) {
         const pr = proyectoDe(o), g = pr ? Proyectos.gestiona(pr) : false;
-        const propio = o.solicitado_por === miPerfil?.id;
+        const propio = o.solicitado_por === miPerfil?.id, aprueba = puedeAprobar(o, pr);
         const t = o.totales || {};
+        const contacto = [o.despacho?.contacto, o.despacho?.telefono, o.despacho?.email].filter(Boolean).join(' · ');
         const acciones = [
             btn('PDF', `Compras.exportarPDF('${o.id}')`, 'bg-red-600 hover:bg-red-700 text-white'),
             o.adjunto_path ? btn('Ver respaldo', `Proyectos.verArchivo('${h(o.adjunto_path)}')`, 'border border-slate-300 text-slate-700 hover:bg-slate-50') : '',
             o.estado === 'borrador' && (g || propio) ? btn('Editar', `Compras.editar('${o.id}')`, 'border border-slate-300 text-slate-700 hover:bg-slate-50') : '',
-            o.estado === 'borrador' && g ? btn('Emitir orden de compra', `Compras.cambiarEstado('${o.id}','emitida')`, 'bg-blue-700 hover:bg-blue-800 text-white') : '',
+            o.estado === 'borrador' && aprueba ? btn('Aprobar y emitir', `Compras.cambiarEstado('${o.id}','emitida')`, 'bg-blue-700 hover:bg-blue-800 text-white') : '',
             o.estado === 'emitida' ? btn('Marcar recibida', `Compras.pedirRecepcion('${o.id}')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
             ['emitida', 'recibida'].includes(o.estado) && !o.gasto_id ? btn('Cargar a gastos del proyecto', `Compras.cargarAGastos('${o.id}')`, 'bg-amber-600 hover:bg-amber-700 text-white') : '',
             o.gasto_id ? btn('Ver en gastos', `Compras.irAGastos('${o.proyecto_id}')`, 'border border-emerald-300 text-emerald-700 hover:bg-emerald-50') : '',
@@ -407,7 +443,7 @@ const Compras = (() => {
             <td class="px-3 py-2 text-right">${fmtCant(it.cantidad)}</td><td class="px-3 py-2 text-right">${fmtCLP(it.precio)}</td><td class="px-3 py-2 text-right font-bold">${fmtCLP(it.total)}</td></tr>`).join('');
         const historial = [
             `Solicitada por <b>${h(Proyectos.nombrePerfil(o.solicitado_por))}</b> el ${fecha(o.creado_en)}`,
-            o.aprobado_por ? `Emitida por <b>${h(Proyectos.nombrePerfil(o.aprobado_por))}</b> el ${fecha(o.aprobado_en)}` : '',
+            o.aprobado_por ? `Aprobada y emitida por <b>${h(Proyectos.nombrePerfil(o.aprobado_por))}</b> el ${fecha(o.aprobado_en)}` : '',
             o.factura_numero ? `Documento del proveedor: <b>${h(o.factura_numero)}</b>` : '',
             o.gasto_id ? '<span class="text-emerald-700 font-semibold">Cargada a los gastos del proyecto</span>' : '',
         ].filter(Boolean).map(x => `<li>${x}</li>`).join('');
@@ -419,10 +455,12 @@ const Compras = (() => {
             </div>
             <div class="flex flex-wrap gap-2">${acciones}</div>
             ${recepcion}
-            ${o.estado === 'borrador' && !g ? `<p class="text-xs text-slate-500">Pendiente de emisión por el administrador del proyecto (${h(Proyectos.nombrePerfil(pr?.administrador_id))}).</p>` : ''}
+            ${o.estado === 'borrador' ? (aprueba
+                ? `<p class="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">Te corresponde aprobarla${nivelAprobacion(t.neto || 0) ? ` como ${NIVELES[nivelAprobacion(t.neto || 0)]} (neto ${fmtCLP(t.neto)})` : ''}.</p>`
+                : `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Pendiente de aprobación por ${h(aprobadorRequerido(o, pr))}.</p>`) : ''}
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 ${tarjeta('Proveedor', `<div class="grid grid-cols-2 gap-3 text-sm">${dato('Razón social', o.proveedor?.nombre)}${dato('RUT', o.proveedor?.rut)}${dato('Dirección', o.proveedor?.direccion)}${dato('Ciudad', o.proveedor?.ciudad)}${dato('Teléfono', o.proveedor?.telefono)}${dato('Vendedor', o.proveedor?.vendedor)}${dato('Correo', o.proveedor?.email)}</div>`)}
-                ${tarjeta('Condiciones y despacho', `<div class="grid grid-cols-2 gap-3 text-sm">${dato('Forma de pago', o.forma_pago)}${dato('Fecha de entrega', o.despacho?.fecha_entrega ? fecha(o.despacho.fecha_entrega) : '')}${dato('Despachar a', o.despacho?.direccion)}${dato('Contacto', o.despacho?.contacto)}${dato('N° OC externa', o.numero_externo)}${dato('Observaciones', o.observaciones)}</div>`)}
+                ${tarjeta('Condiciones y despacho', `<div class="grid grid-cols-2 gap-3 text-sm">${dato('Forma de pago', o.forma_pago)}${dato('Fecha de entrega', o.despacho?.fecha_entrega ? fecha(o.despacho.fecha_entrega) : '')}${dato('Despachar a', o.despacho?.direccion)}${dato('Contacto', contacto)}${dato('N° OC externa', o.numero_externo)}${dato('Observaciones', o.observaciones)}</div>`)}
             </div>
             ${tarjeta('Detalle de artículos', `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[640px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">N°</th><th class="px-3 py-2 text-left">Código</th><th class="px-3 py-2 text-left">Detalle</th><th class="px-3 py-2">Unidad</th><th class="px-3 py-2 text-right">Cantidad</th><th class="px-3 py-2 text-right">Valor unit.</th><th class="px-3 py-2 text-right">Total línea</th></tr></thead><tbody>${items}</tbody></table></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4"><ul class="text-xs text-slate-500 space-y-1 list-disc pl-4">${historial}</ul><div>${totalesHtml(t)}</div></div>`)}
@@ -437,13 +475,13 @@ const Compras = (() => {
         const o = ordenes.find(x => x.id === id);
         if (!o) return;
         const textos = {
-            emitida: o.estado === 'borrador' ? `¿Emitir ${numeroOC(o)} a ${o.proveedor?.nombre} por ${fmtCLP(o.totales?.total)}? Después no podrás modificar su contenido.` : `¿Devolver ${numeroOC(o)} a emitida?`,
+            emitida: o.estado === 'borrador' ? `¿Aprobar y emitir ${numeroOC(o)} a ${o.proveedor?.nombre} por ${fmtCLP(o.totales?.total)}? Después no podrás modificar su contenido.` : `¿Devolver ${numeroOC(o)} a emitida?`,
             borrador: `¿Devolver ${numeroOC(o)} a borrador para modificarla?`,
             anulada: `¿Anular ${numeroOC(o)}? Quedará registrada como anulada.`,
         };
         if (!confirm(textos[estado] || '¿Confirmas el cambio?')) return;
         const data = await ejecutar(supa.from('ordenes_compra').update({ estado }).eq('id', id).select().single(),
-            { emitida: 'Orden de compra emitida', borrador: 'Orden de compra en borrador', anulada: 'Orden de compra anulada' }[estado]);
+            { emitida: 'Orden de compra aprobada y emitida', borrador: 'Orden de compra en borrador', anulada: 'Orden de compra anulada' }[estado]);
         if (!data) return;
         reemplazar(data);
         refrescar();
@@ -598,7 +636,7 @@ const Compras = (() => {
     <div class="cierre">
       <div class="nota">
         ${desp.direccion ? `<p><b>Despachar a:</b> ${h(desp.direccion)}</p>` : ''}
-        ${desp.contacto ? `<p><b>Contacto despacho:</b> ${h(desp.contacto)}</p>` : ''}
+        ${desp.contacto || desp.telefono || desp.email ? `<p><b>Contacto despacho:</b> ${[desp.contacto, desp.telefono, desp.email].filter(Boolean).map(h).join(' · ')}</p>` : ''}
         ${o.observaciones ? `<p><b>Nota al proveedor:</b> ${h(o.observaciones)}</p>` : ''}
         <p><b>Para recepcionar la factura</b> debe indicar el N° ${numeroOC(o)} y adjuntar la guía de despacho.${emp.email_contacto ? ` Enviar facturas a <b>${h(emp.email_contacto)}</b>.` : ''}</p>
       </div>
@@ -620,11 +658,58 @@ const Compras = (() => {
         generarPDF(css, html, `${numeroOC(o)}${sufijo ? ' ' + sufijo : ''}.pdf`);
     }
 
+    // ── Configuración de aprobaciones (pestaña Mi Empresa; solo la edita el administrador) ──
+    function renderConfig(equipo) {
+        const root = $('oc-config');
+        if (!root) return;
+        if (!disponible) { root.innerHTML = ''; return; }
+        const c = configAprobacion(), admin = miPerfil?.rol === 'admin', dis = admin ? '' : 'disabled';
+        const monto = (id, valor) => `<input id="${id}" inputmode="numeric" value="${h(Math.round(valor).toLocaleString('es-CL'))}" class="campo-input mt-1 text-right" ${dis}>`;
+        const persona = (id, sel, vacio) => `<select id="${id}" class="campo-input mt-1" ${dis}><option value="">${vacio}</option>${(equipo || []).map(p => `<option value="${h(p.id)}" ${p.id === sel ? 'selected' : ''}>${h(p.nombre || '(sin nombre)')}${p.rol === 'admin' ? ' (admin)' : ''}</option>`).join('')}</select>`;
+        root.innerHTML = `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-amber-700 to-amber-500 px-6 py-4">
+                <h2 class="text-white text-lg font-bold">Aprobación de órdenes de compra</h2>
+                <p class="text-amber-100 text-xs mt-0.5">Quién aprueba cada orden de compra según su monto neto (sin IVA)</p>
+            </div>
+            <form onsubmit="Compras.guardarConfig(event)" class="p-6 space-y-4">
+                <label class="flex items-center gap-2 text-sm font-semibold text-slate-700"><input id="oc-cfg-activo" type="checkbox" ${c.activo ? 'checked' : ''} ${dis}> Aprobar por tramos de monto</label>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div class="rounded-xl border border-slate-200 p-4"><p class="font-bold text-slate-800">1 · Administrador del proyecto</p>
+                        <p class="text-xs text-slate-500 mt-1">El designado en cada proyecto. Aprueba hasta:</p>${monto('oc-cfg-l1', c.limite_administrador)}</div>
+                    <div class="rounded-xl border border-slate-200 p-4"><p class="font-bold text-slate-800">2 · Gerente de proyectos</p>
+                        <p class="text-xs text-slate-500 mt-1">Sobre el tramo anterior y hasta:</p>${monto('oc-cfg-l2', c.limite_gerente_proyectos)}
+                        ${persona('oc-cfg-gp', c.gerente_proyectos_id, '— Sin designar —')}
+                        <p class="text-xs text-slate-400 mt-1">Sin designar, aprueba el gerente general.</p></div>
+                    <div class="rounded-xl border border-slate-200 p-4"><p class="font-bold text-slate-800">3 · Gerente general</p>
+                        <p class="text-xs text-slate-500 mt-1">Todo monto sobre el tramo 2.</p>
+                        ${persona('oc-cfg-gg', c.gerente_general_id, '— Sin designar —')}
+                        <p class="text-xs text-slate-400 mt-1">Sin designar, aprueba el administrador de la empresa.</p></div>
+                </div>
+                <p class="text-xs text-slate-500">Un nivel superior también puede aprobar los montos menores. Mientras esté desactivado, el administrador del proyecto aprueba cualquier monto.</p>
+                ${admin ? '<div class="flex justify-end"><button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-6 rounded-lg transition-colors">Guardar aprobaciones</button></div>' : '<p class="text-xs text-slate-400">Solo el administrador de la empresa modifica esta configuración.</p>'}
+            </form></div>`;
+    }
+    async function guardarConfig(ev) {
+        ev.preventDefault();
+        const cfg = {
+            activo: $('oc-cfg-activo').checked,
+            limite_administrador: pesos($('oc-cfg-l1').value), limite_gerente_proyectos: pesos($('oc-cfg-l2').value),
+            gerente_proyectos_id: $('oc-cfg-gp').value, gerente_general_id: $('oc-cfg-gg').value,
+        };
+        if (cfg.limite_administrador < 0 || cfg.limite_gerente_proyectos < cfg.limite_administrador)
+            return toast('El monto del gerente de proyectos debe ser mayor o igual al del administrador del proyecto', 'error');
+        const data = await ejecutar(supa.from('empresas').update({ aprobacion_oc: cfg }).eq('id', empresaActual.id).select('aprobacion_oc').single(), 'Aprobaciones de órdenes de compra guardadas');
+        if (!data) return;
+        empresaActual.aprobacion_oc = data.aprobacion_oc;
+        refrescar();
+    }
+
     return {
+        renderConfig, guardarConfig,
         cargar, render, htmlProyecto, reiniciar, deProyecto, filtrar,
         nueva, editar, cancelar, set, setItem, agregarItem, quitarItem, setArchivo, guardar,
         ver, volver, pedirRecepcion, recibir, cambiarEstado, eliminar, cargarAGastos, irAGastos, exportarPDF,
         get disponible() { return disponible; },
-        test: { calcular, cantidad, pesos },
+        test: { calcular, cantidad, pesos, nivelAprobacion, puedeAprobar },
     };
 })();
