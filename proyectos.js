@@ -234,8 +234,9 @@ const Proyectos = (() => {
         const cobranza = edps.filter(e => e.estado === 'aprobado')
             .map(e => ({ e, pr: proyectos.find(x => x.id === e.proyecto_id) })).filter(x => x.pr)
             .sort((a, b) => (diasAtraso(b.e) ?? -1e9) - (diasAtraso(a.e) ?? -1e9));
-        const sinProyecto = presupuestos.filter(p => p.estado === 'adjudicado' && !existePara(p.id));
-        const ordenados = [...proyectos].sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'activo' ? -1 : 1));
+        const sinProyecto = ordenarRecientes(presupuestos.filter(p => p.estado === 'adjudicado' && !existePara(p.id)), p => p.fechaAdjudicacion);
+        const ordenados = [...proyectos].sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'activo' ? -1 : 1)
+            || (b.creado_en || '').localeCompare(a.creado_en || ''));
         const cards = ordenados.map(pr => {
             const r = resumen(pr), p = r.p;
             if (!p) return '';
@@ -335,7 +336,7 @@ const Proyectos = (() => {
             g && activo && !r.abierto && !completo ? btn('+ Nuevo estado de pago', `Proyectos.nuevoEdp('avance')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
             g && activo && !r.abierto && completo && r.retenido > 0 && !r.devolucion ? btn('Solicitar devolución de retención', `Proyectos.nuevoEdp('devolucion_retencion')`, 'bg-purple-600 hover:bg-purple-700 text-white') : '',
         ].join(' ');
-        const filas = lista.map(e => `<tr class="border-t border-slate-100 cursor-pointer ${e.id === edpSelId ? 'bg-blue-50' : 'hover:bg-slate-50'}" onclick="Proyectos.seleccionarEdp('${e.id}')">
+        const filas = [...lista].reverse().map(e => `<tr class="border-t border-slate-100 cursor-pointer ${e.id === edpSelId ? 'bg-blue-50' : 'hover:bg-slate-50'}" onclick="Proyectos.seleccionarEdp('${e.id}')">
             <td class="px-3 py-2 font-mono font-bold">N° ${String(e.numero).padStart(2, '0')}${e.tipo === 'devolucion_retencion' ? '<span class="block text-xs font-sans font-normal text-purple-700">Devolución retención</span>' : ''}</td>
             <td class="px-3 py-2">${fecha(e.fecha_presentacion)}</td>
             <td class="px-3 py-2 text-right">${e.tipo === 'avance' ? fmtPct(e.totales?.pctAvance) : '—'}</td>

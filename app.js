@@ -1002,12 +1002,18 @@ function refrescarMontosFormulario() {
 // ════════════════════════════════════════════════════════
 // TAB 2 · ENVIADOS
 // ════════════════════════════════════════════════════════
+// Orden común de todas las listas: fecha más reciente primero; a igual fecha, el número más alto primero.
+function ordenarRecientes(lista, fechaDe, numeroDe = x => x.numero) {
+    const num = x => parseInt(String(numeroDe(x) || '').replace(/\D/g, '')) || 0;
+    return [...lista].sort((a, b) => (fechaDe(b) || '').localeCompare(fechaDe(a) || '') || num(b) - num(a));
+}
+
 function renderEnviados() {
     const filtro = (document.getElementById('filtro-enviados')?.value || '').toLowerCase();
-    const lista  = presupuestos.filter(p =>
+    const lista  = ordenarRecientes(presupuestos.filter(p =>
         p.estado === 'enviado' &&
         (p.numero.toLowerCase().includes(filtro) || p.cliente.nombre.toLowerCase().includes(filtro))
-    );
+    ), p => p.fecha);
     const tbody = document.getElementById('enviados-tbody');
     const vacio = document.getElementById('enviados-vacio');
 
@@ -1228,22 +1234,49 @@ function confirmarContrato() {
     const firmaB64 = fcCanvas.toDataURL('image/png');
     const p = presupuestos.find(x => x.id === contratoActualId);
     if (!p) return;
-    p.estado = 'adjudicado';
-    p.fechaAdjudicacion = new Date().toISOString().slice(0,10);
     p.firma = { firmaB64, fotoB64, fecha: new Date().toISOString() };
     guardarDB();
-    actualizarBadges();
-    renderEnviados();
     renderAdjudicados();
     cerrarModal('modal-contrato');
-    toast(`Contrato ${p.numero} adjudicado y firmado`, 'success');
+    toast(`Contrato ${p.numero} firmado por el cliente`, 'success');
+}
+
+// ── Firma remota del adjudicado (link para el cliente) ────
+async function generarLinkFirmaAdjudicacion(presId) {
+    if (!supa) return toast('Falta configurar la anon key de Supabase en app.js', 'error');
+    const p = presupuestos.find(x => x.id === presId);
+    if (!p || p.estado !== 'adjudicado' || p.firma) return;
+    p.firmaRemotaId ||= uid();
+    const c = calcPresupuesto(p);
+
+    const { error: guardarError } = await supa.from('presupuestos').upsert([{ id: p.id, empresa_id: empresaActual.id, data: p, updated_at: new Date().toISOString() }]);
+    if (guardarError) return toast('No se pudo guardar el presupuesto antes de publicar: ' + guardarError.message, 'error');
+    toast('Publicando…', 'info');
+    const { error } = await supa.rpc('publicar_ot', {
+        p_id: p.firmaRemotaId, p_numero: `Contrato ${p.numero}`, p_presupuesto_numero: p.numero,
+        p_empresa_nombre: empresaActual?.nombre_comercial || null,
+        p_moneda: p.moneda || 'CLP',
+        p_decimales: p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP'),
+        p_cliente_nombre: p.cliente.nombre, p_cliente_direccion: p.cliente.direccion,
+        p_cliente_comuna: p.cliente.comuna, p_cliente_region: p.cliente.region,
+        p_condicion: p.condicion, p_capitulos: p.capitulos,
+        p_costo_directo: c.costoDirecto, p_gg: c.gg, p_util: c.util,
+        p_gg_pct: p.ggPct, p_util_pct: p.utilPct, p_usar_gg_util: p.usarGGUtil !== false,
+        p_subtotal: c.subtotal, p_iva: c.iva, p_total: c.total,
+    });
+    if (error) return toast('Error al publicar: ' + error.message, 'error');
+
+    guardarDB();
+    renderAdjudicados();
+    mostrarLinkFirma(`${location.origin}${location.pathname}?firmar=${p.firmaRemotaId}`);
+    toast('Link generado', 'success');
 }
 
 // ════════════════════════════════════════════════════════
 // TAB 3 · ADJUDICADOS
 // ════════════════════════════════════════════════════════
 function renderAdjudicados() {
-    const lista = presupuestos.filter(p => p.estado === 'adjudicado');
+    const lista = ordenarRecientes(presupuestos.filter(p => p.estado === 'adjudicado'), p => p.fechaAdjudicacion);
     const grid  = document.getElementById('adjudicados-grid');
     const vacio = document.getElementById('adjudicados-vacio');
     vacio.classList.toggle('hidden', lista.length > 0);
@@ -1297,7 +1330,22 @@ function renderAdjudicados() {
                         + Orden de Trabajo (${p.ordenesTrabajo.length})
                     </button>
                 </div>
-                ${p.firma?.firmaB64 ? `<img src="${p.firma.firmaB64}" alt="Firma" class="h-8 mt-1 opacity-60 border-t border-slate-100 pt-1">` : ''}
+                ${p.firma?.firmaB64
+                    ? `<div class="flex items-center justify-between border-t border-slate-100 pt-2">
+                        <span class="text-xs font-semibold text-emerald-700">✔ Firmado por el cliente</span>
+                        <img src="${p.firma.firmaB64}" alt="Firma" class="h-8 opacity-60">
+                    </div>`
+                    : `<div class="border-t border-slate-100 pt-2 space-y-2">
+                        <p class="text-xs font-semibold text-amber-700">${p.firmaRemotaId ? '⏳ Link enviado — esperando firma del cliente' : '✍ Firma del cliente pendiente'}</p>
+                        <div class="flex gap-2">
+                            <button onclick="event.stopPropagation(); generarLinkFirmaAdjudicacion('${p.id}')"
+                                class="flex-1 text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">🔗 ${p.firmaRemotaId ? 'Ver link' : 'Solicitar firma'}</button>
+                            <button onclick="event.stopPropagation(); abrirModalContrato('${p.id}')"
+                                class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Firmar aquí</button>
+                            ${p.firmaRemotaId ? `<button onclick="event.stopPropagation(); sincronizarFirmasRemotas()" title="Revisar si el cliente ya firmó"
+                                class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">🔄</button>` : ''}
+                        </div>
+                    </div>`}
                 <button onclick="event.stopPropagation(); revertirAdjudicacion('${p.id}')"
                     class="w-full text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg py-1 font-medium transition-colors">
                     ↩ Revertir adjudicación
@@ -1316,6 +1364,7 @@ function revertirAdjudicacion(id) {
     p.estado = 'enviado';
     p.firma = null;
     delete p.fechaAdjudicacion;
+    delete p.firmaRemotaId;
     guardarDB();
     actualizarBadges();
     renderAdjudicados();
@@ -1356,8 +1405,7 @@ function reactivarPresupuesto(id) {
 }
 
 function renderRechazados() {
-    const lista = presupuestos.filter(p => p.estado === 'rechazado')
-        .sort((a, b) => (b.fechaRechazo || '').localeCompare(a.fechaRechazo || ''));
+    const lista = ordenarRecientes(presupuestos.filter(p => p.estado === 'rechazado'), p => p.fechaRechazo);
     const cont  = document.getElementById('rechazados-section');
     const tbody = document.getElementById('rechazados-tbody');
     document.getElementById('rechazados-count').textContent = lista.length;
@@ -1429,14 +1477,13 @@ function eliminarOrdenTrabajo(presId, id) {
 }
 
 function renderOrdenesTrabajo() {
-    const filas = presupuestos.flatMap(p => p.ordenesTrabajo.map(ot => ({ p, ot })));
+    const filas = ordenarRecientes(presupuestos.flatMap(p => p.ordenesTrabajo.map(ot => ({ p, ot }))), f => f.ot.fecha, f => f.ot.numero);
     const tbody = document.getElementById('ot-tbody');
     const vacio = document.getElementById('ot-vacio');
 
     if (!filas.length) { tbody.innerHTML=''; vacio.classList.remove('hidden'); return; }
     vacio.classList.add('hidden');
 
-    filas.sort((a,b) => (b.ot.fecha||'').localeCompare(a.ot.fecha||''));
 
     tbody.innerHTML = filas.map(({p, ot}) => `
         <tr class="border-t border-slate-100 hover:bg-indigo-50 transition-colors">
@@ -1527,9 +1574,19 @@ async function sincronizarFirmasRemotas() {
     const pendientes = presupuestos.flatMap(p => p.ordenesTrabajo
         .filter(ot => ot.remota && ot.estado === 'pendiente')
         .map(ot => ot));
-    if (!pendientes.length) return toast('No hay órdenes remotas pendientes por sincronizar', 'info');
+    const adjPendientes = presupuestos.filter(p => p.estado === 'adjudicado' && p.firmaRemotaId && !p.firma);
+    if (!pendientes.length && !adjPendientes.length) return toast('No hay firmas remotas pendientes por sincronizar', 'info');
 
     let actualizadas = 0;
+    for (const p of adjPendientes) {
+        const { data, error } = await supa.rpc('obtener_ot_publica', { p_id: p.firmaRemotaId });
+        if (error || !data || !data.length) continue;
+        const remota = data[0];
+        if (remota.estado === 'firmada') {
+            p.firma = { firmaB64: remota.firma_b64, fotoB64: remota.foto_b64, fecha: remota.fecha_firma, remota: true };
+            actualizadas++;
+        }
+    }
     for (const ot of pendientes) {
         const { data, error } = await supa.rpc('obtener_ot_publica', { p_id: ot.id });
         if (error || !data || !data.length) continue;
@@ -1544,7 +1601,8 @@ async function sincronizarFirmasRemotas() {
         guardarDB();
         actualizarBadges();
         renderOrdenesTrabajo();
-        toast(`${actualizadas} orden(es) de trabajo actualizadas`, 'success');
+        renderAdjudicados();
+        toast(`${actualizadas} firma(s) recibida(s)`, 'success');
     } else {
         toast('Sin novedades', 'info');
     }
@@ -1687,8 +1745,10 @@ function renderDocumentoRF(ot) {
     monedaFmt = ot.moneda || 'CLP';
     decimalesFmt = ot.decimales ?? decimalesPorDefecto(ot.moneda || 'CLP');
 
-    document.getElementById('rf-empresa-nombre').textContent = ot.empresa_nombre || 'Orden de Trabajo';
-    document.getElementById('rf-numero').textContent      = `${ot.numero} — ${ot.presupuesto_numero}`;
+    const esContrato = (ot.numero || '').startsWith('Contrato ');
+    document.getElementById('rf-tipo-doc').textContent = esContrato ? 'Aceptación de Presupuesto — Firma Digital' : 'Orden de Trabajo — Firma Digital';
+    document.getElementById('rf-empresa-nombre').textContent = ot.empresa_nombre || (esContrato ? 'Aceptación de Presupuesto' : 'Orden de Trabajo');
+    document.getElementById('rf-numero').textContent      = esContrato ? ot.numero : `${ot.numero} — ${ot.presupuesto_numero}`;
     document.getElementById('rf-cliente').textContent     = ot.cliente_nombre;
     document.getElementById('rf-presupuesto').textContent = ot.presupuesto_numero;
     document.getElementById('rf-direccion').textContent   = `${ot.cliente_direccion||''}, ${ot.cliente_comuna||''}`;
@@ -1907,7 +1967,7 @@ function descartarFoto() {
 }
 function renderSelectFirma() {
     const sel = document.getElementById('firma-presupuesto-id');
-    const sin = presupuestos.filter(p=>!p.firma);
+    const sin = ordenarRecientes(presupuestos.filter(p=>!p.firma), p => p.fecha);
     sel.innerHTML='<option value="">— Seleccione un presupuesto —</option>'+
         sin.map(p=>`<option value="${p.id}">${esc(p.numero)} · ${esc(p.cliente.nombre)}</option>`).join('');
 }
@@ -1918,7 +1978,7 @@ function confirmarFirmaCompleta() {
     const p=presupuestos.find(x=>x.id===id);
     if(!p) return;
     p.firma={firmaB64:firmaDataUrl, fotoB64:fotoDataUrl||null, fecha:new Date().toISOString()};
-    guardarDB(); toast(`Firma asociada a ${p.numero}`,'success'); renderSelectFirma();
+    guardarDB(); toast(`Firma asociada a ${p.numero}`,'success'); renderSelectFirma(); renderAdjudicados();
 }
 
 // ════════════════════════════════════════════════════════
