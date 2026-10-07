@@ -7,3 +7,6 @@ backups/
 presupuestos pdf/
 formatos estados de pago/
 formato orden de compra/
+*.docx
+*.doc
+tests/package-lock.json

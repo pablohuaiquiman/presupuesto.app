@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
 
   try {
     const { email, nombre, colaborador, permisos } = await req.json();
-    if (!email) return json({ error: 'Falta el correo del invitado' }, 400);
+    if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return json({ error: 'Indica un correo válido para el invitado' }, 400);
 
     const authHeader = req.headers.get('Authorization') || '';
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
         id: invited.user.id, empresa_id: null, rol: 'miembro', nombre: nombre || null,
         colaborador_plataforma: true, permisos_plataforma: lista,
       });
-      if (perfilErr) return json({ error: 'Invitación enviada pero no se pudo registrar al colaborador: ' + perfilErr.message }, 500);
+      if (perfilErr) { console.error('invitar-usuario: no se pudo registrar al colaborador', perfilErr.message); return json({ error: 'Invitación enviada, pero no se pudo registrar al colaborador. Contacta a soporte.' }, 500); }
       await supaAdmin.from('plataforma_historial').insert({
         empresa_id: null, actor: user.id, accion: 'colaborador',
         detalle: { cambio: 'invitar', usuario: invited.user.id, email: String(email).trim().toLowerCase(), permisos: lista },
@@ -83,10 +83,11 @@ Deno.serve(async (req) => {
 
     const { error: perfilErr } = await supaAdmin
       .from('perfiles').insert({ id: invited.user.id, empresa_id: perfil.empresa_id, rol: 'miembro', nombre: nombre || null });
-    if (perfilErr) return json({ error: 'Usuario invitado pero no se pudo asociar a tu empresa: ' + perfilErr.message }, 500);
+    if (perfilErr) { console.error('invitar-usuario: no se pudo asociar', perfilErr.message); return json({ error: 'Usuario invitado, pero no se pudo asociar a tu empresa. Contacta a soporte.' }, 500); }
 
     return json({ ok: true });
   } catch (e) {
-    return json({ error: String(e) }, 500);
+    console.error('invitar-usuario: error', e);
+    return json({ error: 'No se pudo enviar la invitación' }, 500);
   }
 });

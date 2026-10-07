@@ -3,7 +3,7 @@
 //   de la siguiente mensualidad pendiente.
 // POST ?webhook=1 (Mercado Pago): consulta el pago en la API de Mercado Pago y, si está aprobado,
 //   acredita el período con mp_acreditar_pago. Nunca se confía en el contenido de la notificación.
-// Secretos: MP_ACCESS_TOKEN (obligatorio), MP_WEBHOOK_SECRET (opcional, valida x-signature), APP_URL.
+// Secretos: MP_ACCESS_TOKEN y MP_WEBHOOK_SECRET (ambos obligatorios; sin la clave de Webhooks no se procesa ningún aviso), APP_URL.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const CORS = {
@@ -42,7 +42,7 @@ async function mp(path: string, init: RequestInit = {}) {
 
 async function firmaValida(req: Request, dataId: string): Promise<boolean> {
   const secreto = Deno.env.get('MP_WEBHOOK_SECRET');
-  if (!secreto) return true;
+  if (!secreto) return false;
   const partes = Object.fromEntries((req.headers.get('x-signature') || '').split(',').map((p) => p.trim().split('=') as [string, string]));
   if (!partes.ts || !partes.v1) return false;
   const manifiesto = `id:${dataId.toLowerCase()};request-id:${req.headers.get('x-request-id') || ''};ts:${partes.ts};`;
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
       const tipo = url.searchParams.get('type') || url.searchParams.get('topic') || body?.type || body?.topic;
       const id = String(url.searchParams.get('data.id') || url.searchParams.get('id') || body?.data?.id || '');
       if (tipo !== 'payment' || !/^\d+$/.test(id)) return json({ ok: true, ignorado: true });
+      if (!Deno.env.get('MP_WEBHOOK_SECRET')) { console.error('mercadopago: falta MP_WEBHOOK_SECRET; aviso no procesado'); return json({ error: 'Avisos no configurados' }, 503); }
       if (!(await firmaValida(req, id))) return json({ error: 'Firma inválida' }, 401);
       const pago = await mp(`/v1/payments/${id}`);
       const cobroId = String(pago.external_reference || '');
@@ -75,10 +76,11 @@ Deno.serve(async (req) => {
         p_fecha_pago: String(pago.date_approved || '').slice(0, 10) || null,
         p_status: String(pago.status || ''),
       });
-      if (error) return json({ error: error.message }, 500);
+      if (error) { console.error('mercadopago: no se pudo acreditar', error.message); return json({ error: 'No se pudo registrar el pago' }, 500); }
       return json({ ok: true, resultado: data });
     } catch (e) {
-      return json({ error: String(e) }, 500);
+      console.error('mercadopago: aviso con error', e);
+      return json({ error: 'No se pudo procesar el aviso' }, 500);
     }
   }
 
@@ -110,7 +112,7 @@ Deno.serve(async (req) => {
     const { data: cobro, error: cobroErr } = await supaAdmin.from('cobros_mp')
       .insert({ empresa_id: empresa.id, periodo_inicio: desde, monto: s.monto_mensual, creado_por: user.id })
       .select('id').single();
-    if (cobroErr || !cobro) return json({ error: 'No se pudo iniciar el cobro: ' + cobroErr?.message }, 500);
+    if (cobroErr || !cobro) { console.error('mercadopago: no se pudo crear el cobro', cobroErr?.message); return json({ error: 'No se pudo iniciar el cobro' }, 500); }
 
     const app = (Deno.env.get('APP_URL') || 'https://pablohuaiquiman.github.io/presupuesto.app/').replace(/\/?$/, '/');
     const preferencia = await mp('/checkout/preferences', {
@@ -135,6 +137,7 @@ Deno.serve(async (req) => {
     await supaAdmin.from('cobros_mp').update({ preference_id: preferencia.id }).eq('id', cobro.id);
     return json({ url: preferencia.init_point, desde, hasta, monto: s.monto_mensual });
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    console.error('mercadopago: error al crear el pago', e);
+    return json({ error: 'No se pudo iniciar el pago. Inténtalo de nuevo en unos minutos.' }, 500);
   }
 });
