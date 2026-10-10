@@ -31,7 +31,10 @@
 .pl-table small { display:block; color:#64748b; font-size:11px; margin-top:6px; }
 .pl-table .pl-button { white-space:nowrap; }
 .pl-badge { display:inline-block; padding:5px 9px; border-radius:30px; font-size:11px; font-weight:700; white-space:nowrap; background:#eef2f6; color:#475569; }
-.pl-autorizada,.pl-al_dia { background:#dcfce7; color:#166534; }
+.pl-autorizada,.pl-al_dia,.pl-opera { background:#dcfce7; color:#166534; }
+.pl-cortesia { background:#e0e7ff; color:#3730a3; }
+.pl-no_opera { background:#fee2e2; color:#991b1b; }
+.pl-sin_permiso { background:#f1f5f9; color:#64748b; font-weight:600; }
 .pl-pendiente,.pl-en_gracia { background:#fef3c7; color:#92400e; }
 .pl-vencida,.pl-bloqueada,.pl-suspendida { background:#fee2e2; color:#991b1b; }
 .pl-programada { background:#dbeafe; color:#1e40af; }
@@ -87,3 +90,6 @@
 .pl-perms { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
 .pl-mine { margin-bottom:20px; padding:14px 18px; }
 @media print { #tab-superadmin,#tab-suscripcion,#pl-switch,#pl-dialog { display:none !important; } }
+
+.pl-quick { font-size:13px; color:#64748b; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.pl-quick .pl-button { padding:6px 10px; font-size:12px; }

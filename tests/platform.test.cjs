@@ -25,4 +25,27 @@ assert.equal(resumen(e,s,'2026-01-30').operativo,false);
 assert.equal(resumen(e,null,'2026-12-31').operativo,true);
 assert.equal(resumen({...e,acceso_transitorio:false},null,'2026-12-31').operativo,false);
 assert.equal(h('<img src=x onerror="alert(1)">'), '&lt;img src=x onerror=&quot;alert(1)&quot;&gt;');
-console.log('ALL SCRIPTS VALID · HTML y comprobaciones de fechas, acceso y escape correctas');
+// Cuenta de cortesía: opera sin pagos ni vencimiento mientras esté autorizada y no cancelada.
+const c={inicio:'2026-10-10',periodos_pagados:0,dias_gracia:5,cancelada:false,cortesia:true,monto_mensual:0};
+assert.equal(resumen(e,c,'2026-10-10').estado_pago,'cortesia');
+assert.equal(resumen(e,c,'2027-12-31').operativo,true);
+assert.equal(resumen(e,c,'2027-12-31').vencimiento,null);
+assert.equal(resumen(e,c,'2026-10-09').operativo,false);
+assert.equal(resumen(e,{...c,cancelada:true},'2026-10-10').operativo,false);
+assert.equal(resumen({...e,estado_acceso:'suspendida'},c,'2026-10-10').operativo,false);
+// Cortesía con fecha de término: «5 días» desde el 10 es hasta el 14 inclusive; el 15 ya no opera.
+const c5={...c,cortesia_hasta:'2026-10-14'};
+assert.equal(resumen(e,c5,'2026-10-14').operativo,true);
+assert.equal(resumen(e,c5,'2026-10-14').vencimiento,'2026-10-14');
+assert.equal(resumen(e,c5,'2026-10-15').operativo,false);
+assert.equal(resumen(e,c5,'2026-10-15').estado_pago,'vencida');
+assert.match(resumen(e,c5,'2026-10-15').motivo,/terminó el 14\/10\/2026/);
+// «Autorizada» con la suscripción cancelada y sin pagos NO opera, y la pantalla dice por qué (caso del 10-10-2026).
+const cancelada=resumen(e,{inicio:'2026-10-10',periodos_pagados:0,dias_gracia:5,cancelada:true},'2026-10-10');
+assert.equal(cancelada.operativo,false);
+assert.match(cancelada.motivo,/cancelada y no tiene ningún período pagado/);
+assert.equal(resumen(e,s,'2026-03-04').motivo,'');
+assert.match(resumen(e,s,'2026-03-05').motivo,/venció el 28\/02\/2026/);
+assert.match(resumen({...e,estado_acceso:'bloqueada'},s,'2026-02-10').motivo,/bloqueada/);
+assert.match(resumen({...e,acceso_transitorio:false},null,'2026-12-31').motivo,/plan o marcarla como cortesía/);
+console.log('ALL SCRIPTS VALID · HTML y comprobaciones de fechas, acceso, cortesía y escape correctas');
