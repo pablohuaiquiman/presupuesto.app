@@ -295,6 +295,107 @@ await db.exec("select public.crear_empresa_y_admin('Empresa nueva','Usuario nuev
 await rejects("select public.crear_empresa_y_admin('Otra','x')",/ya tiene una empresa/);
 await db.exec("reset role");
 assert.equal(await value("select (aprobada=false and limite_usuarios=1)::text v from public.empresas where nombre_comercial='Empresa nueva'"),'true');
+
+// ── Cortesía, lectura acotada a los permisos e historial legible (revisión 10-10-2026) ──
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610100001_cortesia_y_permisos.sql','utf8'));
+const hoyTxt=await value("select (now() at time zone 'America/Santiago')::date::text v");
+const ec='c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0', socio='50c10000-0000-4000-8000-000000000001', lector='1ec70000-0000-4000-8000-000000000002', cobros='c0b20000-0000-4000-8000-000000000003', accesos='acce0000-0000-4000-8000-000000000004';
+await db.exec("insert into auth.users values ('"+socio+"','socio@test.local'),('"+lector+"','lector@test.local'),('"+cobros+"','cobros@test.local'),('"+accesos+"','accesos@test.local'); insert into public.empresas(id,nombre_comercial,aprobada,estado_acceso,limite_usuarios) values ('"+ec+"','Socio de regalo',true,'autorizada',2); insert into public.perfiles(id,empresa_id,rol,nombre) values ('"+socio+"','"+ec+"','admin','Socio');");
+await as(admin);
+// Lo que pasaba: autorizada + suscripción cancelada sin pagos = sin acceso, aunque la lista diga «Autorizada».
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Mensual',30000,'"+hoyTxt+"',5,true)");
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),false);
+// El precio en cero solo se acepta como cortesía.
+await rejects("select public.plataforma_configurar_suscripcion('"+ec+"','Gratis',0,'"+hoyTxt+"',5,false)",/mayor que cero/);
+await rejects("update public.suscripciones set monto_mensual=0 where empresa_id='"+ec+"'",/permission denied|suscripciones_monto_mensual_check/);
+// Cortesía: opera sin pagos y sin vencimiento; el precio queda en cero aunque llegue otro valor.
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',30000,'"+hoyTxt+"',5,false,true)");
+assert.equal(await value("select (cortesia and monto_mensual=0)::text v from public.suscripciones where empresa_id='"+ec+"'"),'true');
+assert.equal(await value("select public.estado_servicio('"+ec+"')->>'estado_pago' v"),'cortesia');
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),true);
+assert.equal(await value("select public.estado_servicio('"+ec+"')->>'vencimiento' v"),null);
+await rejects("select public.plataforma_registrar_pago(gen_random_uuid(),'"+ec+"','"+hoyTxt+"',0,'REGALO-1','"+hoyTxt+"')",/cortesía no registra pagos/);
+assert.equal(await value("select count(*)::int v from public.pagos_suscripcion where empresa_id='"+ec+"'"),0);
+await as(socio);
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),true);
+await db.exec("insert into public.presupuestos values ('pc1','"+ec+"','{}',now())");
+// La cortesía se puede cancelar, programar a futuro, o dejar sin efecto bloqueando la empresa.
+await as(admin);
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',0,'"+hoyTxt+"',5,true,true)");
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),false);
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',0,('"+hoyTxt+"'::date+10),5,false,true)");
+assert.equal(await value("select public.estado_servicio('"+ec+"')->>'estado_pago' v"),'programada');
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',0,'"+hoyTxt+"',5,false,true)");
+await db.exec("select public.plataforma_cambiar_acceso('"+ec+"','suspendida','Prueba de suspensión')");
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),false);
+await db.exec("select public.plataforma_cambiar_acceso('"+ec+"','autorizada','Fin de la prueba')");
+// Las llamadas antiguas (6 parámetros) siguen funcionando y vuelven a un plan pagado.
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Mensual',25000,'"+hoyTxt+"',5,false)");
+assert.equal(await value("select (not cortesia and monto_mensual=25000)::text v from public.suscripciones where empresa_id='"+ec+"'"),'true');
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',0,'"+hoyTxt+"',5,false,true)");
+// Un pago de Mercado Pago que llegara para una cuenta de cortesía queda en revisión, no se acredita.
+await db.exec("reset role");
+const cobroCortesia='c0b2c0b2-c0b2-4c0b-8c0b-c0b2c0b2c0b2';
+await db.exec("insert into public.cobros_mp(id,empresa_id,periodo_inicio,monto) values ('"+cobroCortesia+"','"+ec+"','"+hoyTxt+"',25000)");
+assert.equal(await value("select public.mp_acreditar_pago('"+cobroCortesia+"','mp-cortesia-1',25000,'"+hoyTxt+"','approved') v"),'revision');
+assert.equal(await value("select periodos_pagados v from public.suscripciones where empresa_id='"+ec+"'"),0);
+
+// Lectura acotada a los permisos. Tres colaboradores: sin permisos, con 'suscripciones' y con 'acceso'.
+await as(admin);
+await db.exec("select public.plataforma_agregar_colaborador('lector@test.local','{}'); select public.plataforma_agregar_colaborador('cobros@test.local','{suscripciones}'); select public.plataforma_agregar_colaborador('accesos@test.local','{acceso}');");
+const totalEmpresas=await value("select count(*)::int v from public.empresas");
+const totalSus=await value("select count(*)::int v from public.suscripciones"), totalPagos=await value("select count(*)::int v from public.pagos_suscripcion");
+const totalPerfiles=await value("select count(*)::int v from public.perfiles"), totalHist=await value("select count(*)::int v from public.plataforma_historial");
+assert.ok(totalSus>0 && totalPagos>0 && totalHist>5);
+for (const quien of [lector,cobros,accesos]) {
+ await as(quien);
+ assert.equal(await value("select count(*)::int v from public.empresas"),totalEmpresas);                       // todos ven la lista de empresas
+ assert.equal(await value("select count(*)::int v from public.plataforma_usuarios_por_empresa()")>0,true);     // y cuántos usuarios tiene cada una
+ assert.equal(await value("select count(*)::int v from public.presupuestos"),0);                               // nadie ve documentos de las empresas
+ assert.equal(await value("select count(*)::int v from public.plataforma_historial where accion in ('colaborador','eliminacion')"),0);
+}
+await as(lector);   // sin permisos: solo la lista
+assert.equal(await value("select count(*)::int v from public.suscripciones"),0);
+assert.equal(await value("select count(*)::int v from public.pagos_suscripcion"),0);
+assert.equal(await value("select count(*)::int v from public.cobros_mp"),0);
+assert.equal(await value("select count(*)::int v from public.perfiles"),1);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial"),0);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial_legible('"+ec+"')"),0);
+await as(cobros);   // 'suscripciones': planes y pagos, pero no perfiles ni movimientos de acceso
+assert.equal(await value("select count(*)::int v from public.suscripciones"),totalSus);
+assert.equal(await value("select count(*)::int v from public.pagos_suscripcion"),totalPagos);
+assert.ok(await value("select count(*)::int v from public.cobros_mp")>0);
+assert.equal(await value("select count(*)::int v from public.perfiles"),1);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial where accion in ('acceso','cupo')"),0);
+assert.ok(await value("select count(*)::int v from public.plataforma_historial where accion='suscripcion'")>0);
+await as(accesos);  // 'acceso': perfiles y movimientos de acceso, pero nada de dinero
+assert.equal(await value("select count(*)::int v from public.suscripciones"),0);
+assert.equal(await value("select count(*)::int v from public.pagos_suscripcion"),0);
+assert.equal(await value("select count(*)::int v from public.cobros_mp"),0);
+assert.equal(await value("select count(*)::int v from public.perfiles"),totalPerfiles);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial where accion in ('suscripcion','pago','pago_revision')"),0);
+assert.ok(await value("select count(*)::int v from public.plataforma_historial where accion='acceso'")>0);
+await as(admin);    // el dueño sigue viendo todo
+assert.equal(await value("select count(*)::int v from public.plataforma_historial"),totalHist);
+assert.equal(await value("select count(*)::int v from public.suscripciones"),totalSus);
+// El administrador de una empresa sigue viendo SU suscripción y sus pagos, y nada de las demás.
+await as(socio);
+assert.equal(await value("select count(*)::int v from public.suscripciones"),1);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial"),0);
+
+// Historial legible: nombre de quien hizo el cambio en vez de su identificador.
+await db.exec("reset role"); await db.exec("update public.perfiles set nombre='Pablo Dueño' where id='"+admin+"'");
+await as(admin);
+assert.equal(await value("select actor_nombre v from public.plataforma_historial_legible('"+ec+"') where accion='acceso' limit 1"),'Pablo Dueño');
+assert.equal(await value("select (actor_nombre is null)::text v from public.plataforma_historial_legible('"+ec+"') where accion='pago_revision' limit 1"),'true');   // automático
+assert.equal(await value("select count(*)::int v from public.plataforma_historial_legible('"+ec+"',2)"),2);
+await as(socio);
+assert.equal(await value("select count(*)::int v from public.plataforma_historial_legible('"+ec+"')"),0);
+await db.exec("reset role; set role anon; select set_config('request.jwt.claim.sub','',false);");
+await rejects("select * from public.plataforma_historial_legible('"+ec+"')",/permission denied/);
+await rejects("select * from public.plataforma_usuarios_por_empresa()",/permission denied/);
+await db.exec("reset role");
 await db.close();
-console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores y aprobación de órdenes de compra correctos.');
+console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores, aprobación de órdenes de compra, cuentas de cortesía, lectura acotada a permisos e historial legible correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});
