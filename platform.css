@@ -90,3 +90,6 @@
 .pl-perms { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
 .pl-mine { margin-bottom:20px; padding:14px 18px; }
 @media print { #tab-superadmin,#tab-suscripcion,#pl-switch,#pl-dialog { display:none !important; } }
+
+.pl-quick { font-size:13px; color:#64748b; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.pl-quick .pl-button { padding:6px 10px; font-size:12px; }

@@ -127,7 +127,7 @@ try {
  await page.locator('[data-action="detail"]').click();
  await page.locator('#pl-plan').waitFor();
  await page.locator('#pl-price').fill('20000');
- await page.locator('#pl-subscription-form button').click();
+ await page.locator('#pl-subscription-form button[type=submit]').click();
  await page.locator('#pl-payment-form').waitFor();
  await page.locator('#pl-reference').fill('BANCO-001');
  await page.locator('#pl-payment-form button').click();

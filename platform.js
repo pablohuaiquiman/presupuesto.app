@@ -42,9 +42,11 @@ const Plataforma = (() => {
         const conMotivo = (r,porPago) => ({...r,motivo:r.operativo ? '' : (!autorizada ? 'El acceso está «'+(etiquetas[estadoAcceso] || estadoAcceso).toLowerCase()+'».' : porPago)});
         if (!s) return conMotivo({estado_pago:'sin_configurar',vencimiento:null,operativo:autorizada && e.acceso_transitorio === true},'Falta asignarle un plan o marcarla como cortesía.');
         if (s.cortesia) {
-            const estadoCortesia = s.cancelada ? 'cancelada' : (hoy < s.inicio ? 'programada' : 'cortesia');
-            return conMotivo({estado_pago:estadoCortesia,vencimiento:null,operativo:autorizada && hoy >= s.inicio && !s.cancelada},
-                s.cancelada ? 'La cortesía está cancelada.' : 'La cortesía rige desde el '+fecha(s.inicio)+'.');
+            // «cortesia_hasta» es el último día de la cortesía; vacío = sin vencimiento.
+            const terminada = !!s.cortesia_hasta && hoy > s.cortesia_hasta;
+            const estadoCortesia = s.cancelada ? 'cancelada' : (hoy < s.inicio ? 'programada' : (terminada ? 'vencida' : 'cortesia'));
+            return conMotivo({estado_pago:estadoCortesia,vencimiento:s.cortesia_hasta || null,operativo:autorizada && hoy >= s.inicio && !s.cancelada && !terminada},
+                s.cancelada ? 'La cortesía está cancelada.' : (terminada ? 'La cortesía terminó el '+fecha(s.cortesia_hasta)+'.' : 'La cortesía rige desde el '+fecha(s.inicio)+'.'));
         }
         const vence = fechaCiclo(s.inicio,s.periodos_pagados);
         let estado = 'vencida';
@@ -211,7 +213,7 @@ const Plataforma = (() => {
             const accesoBadge=badge(e.estado_acceso)+(verDinero ? ' '+badge(r.operativo ? 'opera' : 'no_opera')+(r.motivo ? '<small>'+h(r.motivo)+'</small>' : '') : '');
             const pagoBadge=verDinero ? badge(r.estado_pago) : badge('sin_permiso');
             const plan=verDinero ? h(s?.plan_nombre || (e.acceso_transitorio ? 'Transición sin cobro' : 'Requiere un plan')) : '', usados=usuariosPorEmpresa[e.id] ?? 0;
-            const vencimiento=!verDinero ? '—' : (s?.cortesia ? 'Sin vencimiento' : fecha(r.vencimiento));
+            const vencimiento=!verDinero ? '—' : (s?.cortesia && !s.cortesia_hasta ? 'Sin vencimiento' : fecha(r.vencimiento));
             return '<tr><td data-label="Empresa"><strong>'+nombre+'</strong><small>'+contacto+'</small></td><td data-label="Acceso">'+accesoBadge+'</td><td data-label="Suscripción">'+pagoBadge+'<small>'+plan+'</small></td><td data-label="Usuarios">'+usados+' / '+e.limite_usuarios+'</td><td data-label="Vencimiento">'+vencimiento+'</td><td class="pl-actions"><button class="pl-button" data-action="detail" data-id="'+h(e.id)+'">Gestionar</button></td></tr>';
         }).join('') || '<tr><td colspan="6" class="pl-empty">No hay empresas que coincidan con los filtros.</td></tr>';
         $('pl-result-count').textContent=filtradas.length+' de '+empresas.length+' empresas · Moneda de suscripciones: CLP';
@@ -275,7 +277,7 @@ const Plataforma = (() => {
         const d=x.detalle || {}, et=v => (etiquetas[v] || v || '—').toLowerCase();
         if (x.accion==='acceso') return 'De «'+et(d.anterior)+'» a «'+et(d.nuevo)+'»'+(d.motivo ? '. Motivo: '+d.motivo : '');
         if (x.accion==='cupo') return 'De '+d.anterior+' a '+d.nuevo+' usuarios';
-        if (x.accion==='suscripcion') return 'Plan «'+(d.plan || '—')+'»'+(d.cortesia ? ' · cuenta de cortesía, sin cobro' : ' · '+clp(d.monto)+' al mes')+' · inicio '+fecha(d.inicio)+(d.cortesia ? '' : ' · '+d.gracia+' días de gracia')+(d.cancelada ? ' · '+(d.cortesia ? 'cortesía cancelada' : 'renovación cancelada') : '');
+        if (x.accion==='suscripcion') return 'Plan «'+(d.plan || '—')+'»'+(d.cortesia ? ' · cuenta de cortesía, sin cobro'+(d.cortesia_hasta ? ', hasta el '+fecha(d.cortesia_hasta) : ', sin vencimiento') : ' · '+clp(d.monto)+' al mes')+' · inicio '+fecha(d.inicio)+(d.cortesia ? '' : ' · '+d.gracia+' días de gracia')+(d.cancelada ? ' · '+(d.cortesia ? 'cortesía cancelada' : 'renovación cancelada') : '');
         if (x.accion==='pago') return clp(d.monto)+' · período '+fecha(d.desde)+' → '+fecha(d.hasta)+(d.origen==='mercadopago' ? ' · Mercado Pago' : ' · transferencia');
         if (x.accion==='pago_revision') return clp(d.monto)+' recibido por Mercado Pago que no coincide con la suscripción vigente. Hay que revisarlo y registrarlo a mano.';
         if (x.accion==='colaborador') return ({agregar:'Se agregó a ',permisos:'Cambio de permisos de ',quitar:'Se quitó a '}[d.cambio] || '')+(d.email || 'un colaborador');
@@ -361,7 +363,9 @@ const Plataforma = (() => {
                 : '<p>Cupo de usuarios: <strong>'+h(e.limite_usuarios)+'</strong></p>'+sinPermiso;
             const suscripcionForm=puede('suscripciones') ? '<form id="pl-subscription-form" class="pl-form">'+
                 campo('Nombre del plan','pl-plan','text',s?.plan_nombre || 'Mensual','required maxlength="80"')+
-                '<label class="pl-check pl-wide"><input id="pl-courtesy" type="checkbox"'+(s?.cortesia ? ' checked' : '')+'> Cuenta de cortesía: sin cobro y sin vencimiento (socios, cuentas de regalo, pruebas)</label>'+
+                '<label class="pl-check pl-wide"><input id="pl-courtesy" type="checkbox"'+(s?.cortesia ? ' checked' : '')+'> Cuenta de cortesía: sin cobro (socios, cuentas de regalo, pruebas)</label>'+
+                campo('Cortesía hasta (opcional; vacío = sin vencimiento)','pl-courtesy-until','date',s?.cortesia_hasta || '',(s?.cortesia ? '' : 'disabled')+' min="2020-01-01"')+
+                '<div class="pl-wide pl-quick">Duración rápida: '+[5,15,30].map(d => '<button class="pl-button" type="button" data-courtesy-days="'+d+'">'+d+' días</button>').join(' ')+' <button class="pl-button" type="button" data-courtesy-days="0">Sin vencimiento</button></div>'+
                 campo('Precio mensual (CLP)','pl-price','number',s?.cortesia ? '' : (s?.monto_mensual || ''),(s?.cortesia ? 'disabled' : 'required')+' min="1" max="2147483647" step="1"')+
                 campo('Inicio del ciclo','pl-start','date',s?.inicio || hoyChile(),'required min="2020-01-01"'+fechaBloqueada)+
                 campo('Días de gracia','pl-grace','number',s?.dias_gracia ?? 5,'required min="0" max="30" step="1"')+
@@ -381,8 +385,10 @@ const Plataforma = (() => {
             $('pl-access-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_cambiar_acceso',{p_empresa_id:id,p_estado:$('pl-access').value,p_motivo:$('pl-reason').value},true));
             $('pl-quota-form')?.addEventListener('submit',event => accionFormulario(event,'set_limite_usuarios',{p_empresa_id:id,p_limite:Number($('pl-quota').value)}));
             // La cortesía solo viaja cuando está marcada: así una base sin la actualización sigue aceptando el formulario de siempre.
-            $('pl-courtesy')?.addEventListener('change',event => { const precio=$('pl-price'); precio.disabled=event.target.checked; precio.required=!event.target.checked; if (event.target.checked) precio.value=''; });
-            $('pl-subscription-form')?.addEventListener('submit',event => { const cortesia=$('pl-courtesy').checked; accionFormulario(event,'plataforma_configurar_suscripcion',{p_empresa_id:id,p_plan:$('pl-plan').value,p_monto:cortesia ? 0 : Number($('pl-price').value),p_inicio:$('pl-start').value,p_gracia:Number($('pl-grace').value),p_cancelada:$('pl-cancelled').checked,...(cortesia ? {p_cortesia:true} : {})},true); });
+            $('pl-courtesy')?.addEventListener('change',event => { const precio=$('pl-price'), hasta=$('pl-courtesy-until'); precio.disabled=event.target.checked; precio.required=!event.target.checked; if (event.target.checked) precio.value=''; hasta.disabled=!event.target.checked; if (!event.target.checked) hasta.value=''; });
+            // «5 días» = el día de inicio y los cuatro siguientes: el último día con acceso es inicio + 4.
+            $('pl-subscription-form')?.addEventListener('click',event => { const b=event.target.closest('[data-courtesy-days]'); if (!b) return; const dias=Number(b.dataset.courtesyDays), casilla=$('pl-courtesy'); if (!casilla.checked) { casilla.checked=true; casilla.dispatchEvent(new Event('change')); } $('pl-courtesy-until').value=dias ? sumarDias($('pl-start').value || hoyChile(),dias-1) : ''; });
+            $('pl-subscription-form')?.addEventListener('submit',event => { const cortesia=$('pl-courtesy').checked; accionFormulario(event,'plataforma_configurar_suscripcion',{p_empresa_id:id,p_plan:$('pl-plan').value,p_monto:cortesia ? 0 : Number($('pl-price').value),p_inicio:$('pl-start').value,p_gracia:Number($('pl-grace').value),p_cancelada:$('pl-cancelled').checked,...(cortesia ? {p_cortesia:true,p_cortesia_hasta:$('pl-courtesy-until').value || null} : {})},true); });
             $('pl-payment-form')?.addEventListener('submit',event => accionFormulario(event,'plataforma_registrar_pago',{p_id:event.currentTarget.dataset.paymentId,p_empresa_id:id,p_periodo_inicio:event.currentTarget.dataset.period,p_monto:Number($('pl-payment-amount').value),p_referencia:$('pl-reference').value,p_fecha_pago:$('pl-payment-date').value},true));
         } catch(error) {
             if (token===consulta) $('pl-detail').innerHTML='<p role="alert">No se pudo cargar la ficha: '+h(error.message)+'</p>';
@@ -425,7 +431,7 @@ const Plataforma = (() => {
                 const pagoEnLinea=s && !s.cortesia && !s.cancelada && acceso.estado_acceso==='autorizada' && miPerfil.rol==='admin'
                     ? '<div class="pl-pay"><div><strong>Próxima mensualidad: '+clp(s.monto_mensual)+'</strong><small>Período '+fecha(fechaCiclo(s.inicio,s.periodos_pagados))+' → '+fecha(fechaCiclo(s.inicio,s.periodos_pagados+1))+' · tarjeta de crédito, débito o saldo Mercado Pago. Se acredita automáticamente al aprobarse.</small></div><button class="pl-button pl-primary" data-action="mp-pagar">Pagar con Mercado Pago</button></div>'
                     : '';
-                detalle=s?.cortesia ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>Sin cobro</strong><span>Cuenta de cortesía</span></div><div class="pl-stat"><strong>Sin vencimiento</strong><span>Mientras la plataforma la mantenga</span></div></div><p class="pl-footnote">Tu empresa tiene una cuenta de cortesía: no hay mensualidades que pagar.</p>' : s ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>'+clp(s.monto_mensual)+'</strong><span>Mensualidad</span></div><div class="pl-stat"><strong>'+fecha(acceso.vencimiento)+'</strong><span>Fin del tiempo pagado / próximo vencimiento</span></div></div>'+pagoEnLinea+'<p class="pl-footnote">Plazo de gracia: '+s.dias_gracia+' días. También puedes pagar por transferencia; esos pagos los registra la administración de la plataforma.</p><h3>Historial de pagos</h3>'+tablaPagos(pr.data) :
+                detalle=s?.cortesia ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>Sin cobro</strong><span>Cuenta de cortesía</span></div><div class="pl-stat"><strong>'+(s.cortesia_hasta ? fecha(s.cortesia_hasta) : 'Sin vencimiento')+'</strong><span>'+(s.cortesia_hasta ? 'Último día de la cortesía' : 'Mientras la plataforma la mantenga')+'</span></div></div><p class="pl-footnote">Tu empresa tiene una cuenta de cortesía: no hay mensualidades que pagar.'+(s.cortesia_hasta ? ' Para seguir después de esa fecha, contacta a la administración de la plataforma.' : '')+'</p>' : s ? '<div class="pl-stats"><div class="pl-stat"><strong>'+h(s.plan_nombre)+'</strong><span>Plan actual</span></div><div class="pl-stat"><strong>'+clp(s.monto_mensual)+'</strong><span>Mensualidad</span></div><div class="pl-stat"><strong>'+fecha(acceso.vencimiento)+'</strong><span>Fin del tiempo pagado / próximo vencimiento</span></div></div>'+pagoEnLinea+'<p class="pl-footnote">Plazo de gracia: '+s.dias_gracia+' días. También puedes pagar por transferencia; esos pagos los registra la administración de la plataforma.</p><h3>Historial de pagos</h3>'+tablaPagos(pr.data) :
                     (empresaActual.acceso_transitorio ? '<p>Tu empresa está en transición y aún no tiene un plan asignado. No se aplican vencimientos hasta configurar la suscripción.</p>' : '<p>Tu empresa necesita un plan asignado para comenzar a operar. Contacta con la administración de la plataforma.</p>');
             }
             root.innerHTML='<div class="pl-heading"><div><p class="pl-eyebrow">MI EMPRESA</p><h2>Mi suscripción</h2><p>'+h(empresaActual.nombre_comercial)+'</p></div><button class="pl-button" data-action="subscription-refresh">Actualizar estado</button></div><div class="pl-card pl-padding"><div class="pl-status-line">'+badge(acceso.estado_acceso)+badge(estado)+'</div><p>'+(puedeOperar() ? 'Tu empresa tiene acceso operativo.' : 'Tu empresa no tiene acceso operativo. Revisa el estado de acceso y de suscripción con la administración.')+'</p>'+detalle+'</div>';

@@ -33,6 +33,13 @@ assert.equal(resumen(e,c,'2027-12-31').vencimiento,null);
 assert.equal(resumen(e,c,'2026-10-09').operativo,false);
 assert.equal(resumen(e,{...c,cancelada:true},'2026-10-10').operativo,false);
 assert.equal(resumen({...e,estado_acceso:'suspendida'},c,'2026-10-10').operativo,false);
+// Cortesía con fecha de término: «5 días» desde el 10 es hasta el 14 inclusive; el 15 ya no opera.
+const c5={...c,cortesia_hasta:'2026-10-14'};
+assert.equal(resumen(e,c5,'2026-10-14').operativo,true);
+assert.equal(resumen(e,c5,'2026-10-14').vencimiento,'2026-10-14');
+assert.equal(resumen(e,c5,'2026-10-15').operativo,false);
+assert.equal(resumen(e,c5,'2026-10-15').estado_pago,'vencida');
+assert.match(resumen(e,c5,'2026-10-15').motivo,/terminó el 14\/10\/2026/);
 // «Autorizada» con la suscripción cancelada y sin pagos NO opera, y la pantalla dice por qué (caso del 10-10-2026).
 const cancelada=resumen(e,{inicio:'2026-10-10',periodos_pagados:0,dias_gracia:5,cancelada:true},'2026-10-10');
 assert.equal(cancelada.operativo,false);

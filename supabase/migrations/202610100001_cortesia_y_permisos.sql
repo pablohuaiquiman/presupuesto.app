@@ -11,8 +11,11 @@
 begin;
 
 -- ── 1. Cuenta de cortesía ───────────────────────────────────────────────────────────────────────
--- Sin cobro y sin vencimiento: opera mientras la empresa esté autorizada y la cortesía no se cancele.
+-- Sin cobro: opera mientras la empresa esté autorizada y la cortesía no se cancele.
+-- Con «cortesia_hasta» vacío no vence nunca; con una fecha, ese es su último día (por ejemplo, una prueba de 5 días).
 alter table public.suscripciones add column cortesia boolean not null default false;
+alter table public.suscripciones add column cortesia_hasta date;
+alter table public.suscripciones add constraint suscripciones_cortesia_hasta_check check(cortesia_hasta is null or (cortesia and cortesia_hasta>=inicio));
 alter table public.suscripciones drop constraint suscripciones_monto_mensual_check;
 alter table public.suscripciones add constraint suscripciones_monto_mensual_check
  check((not cortesia and monto_mensual>0) or (cortesia and monto_mensual=0));
@@ -27,8 +30,10 @@ begin
  select * into s from public.suscripciones where empresa_id=p_empresa_id;
  if not found then estado:='sin_configurar'; operativo:=e.acceso_transitorio;
  elsif s.cortesia then
-  estado:=case when s.cancelada then 'cancelada' when hoy<s.inicio then 'programada' else 'cortesia' end;
-  operativo:=hoy>=s.inicio and not s.cancelada;
+  vence:=s.cortesia_hasta;   -- último día de la cortesía; null = sin vencimiento
+  estado:=case when s.cancelada then 'cancelada' when hoy<s.inicio then 'programada'
+   when s.cortesia_hasta is not null and hoy>s.cortesia_hasta then 'vencida' else 'cortesia' end;
+  operativo:=hoy>=s.inicio and not s.cancelada and (s.cortesia_hasta is null or hoy<=s.cortesia_hasta);
  else
   vence:=public.fecha_ciclo(s.inicio,s.periodos_pagados);
   estado:=case when s.cancelada then 'cancelada' when hoy<s.inicio then 'programada'
@@ -52,7 +57,7 @@ begin
   select * into s from public.suscripciones where empresa_id=new.empresa_id;
   if found then
    if s.cortesia then
-    if hoy<s.inicio or s.cancelada then raise exception 'Suscripción sin acceso'; end if;
+    if hoy<s.inicio or s.cancelada or (s.cortesia_hasta is not null and hoy>s.cortesia_hasta) then raise exception 'Suscripción sin acceso'; end if;
    else
     vence:=public.fecha_ciclo(s.inicio,s.periodos_pagados);
     if hoy<s.inicio or (hoy>=vence and (s.cancelada or hoy>=vence+s.dias_gracia)) then raise exception 'Suscripción sin acceso'; end if;
@@ -64,12 +69,12 @@ begin
 end;
 $$;
 
--- Se reemplaza la firma de 6 parámetros por una de 7 con valor por defecto: las llamadas antiguas siguen funcionando.
+-- Se reemplaza la firma de 6 parámetros por una de 8 con valores por defecto: las llamadas antiguas siguen funcionando.
 drop function public.plataforma_configurar_suscripcion(uuid,text,integer,date,integer,boolean);
 create function public.plataforma_configurar_suscripcion(
- p_empresa_id uuid,p_plan text,p_monto integer,p_inicio date,p_gracia integer,p_cancelada boolean,p_cortesia boolean default false)
+ p_empresa_id uuid,p_plan text,p_monto integer,p_inicio date,p_gracia integer,p_cancelada boolean,p_cortesia boolean default false,p_cortesia_hasta date default null)
 returns void language plpgsql security definer set search_path=public as $$
-declare anterior public.suscripciones; v_cortesia boolean:=coalesce(p_cortesia,false); v_monto integer;
+declare anterior public.suscripciones; v_cortesia boolean:=coalesce(p_cortesia,false); v_monto integer; v_hasta date;
 begin
  if not public.tengo_permiso_plataforma('suscripciones') then raise exception 'No autorizado'; end if;
  perform 1 from public.empresas where id=p_empresa_id for update;
@@ -79,17 +84,21 @@ begin
  if p_inicio is null or p_inicio<date '2020-01-01' or p_inicio>(now() at time zone 'America/Santiago')::date+366 then raise exception 'Fecha de inicio inválida'; end if;
  -- La cortesía no cobra: el precio queda en cero aunque llegue otro valor.
  v_monto:=case when v_cortesia then 0 else p_monto end;
+ -- La fecha de término solo existe en una cortesía; un plan pagado vence por sus pagos.
+ v_hasta:=case when v_cortesia then p_cortesia_hasta else null end;
+ if v_hasta is not null and v_hasta<p_inicio then raise exception 'La cortesía no puede terminar antes de su inicio'; end if;
+ if v_hasta is not null and v_hasta>p_inicio+3660 then raise exception 'Fecha de término inválida'; end if;
  if not v_cortesia and (v_monto is null or v_monto<=0) then raise exception 'El precio mensual debe ser mayor que cero. Para no cobrar, marca la cuenta como cortesía'; end if;
- insert into public.suscripciones(empresa_id,plan_nombre,monto_mensual,inicio,dias_gracia,cancelada,cortesia)
- values(p_empresa_id,trim(p_plan),v_monto,p_inicio,p_gracia,p_cancelada,v_cortesia)
+ insert into public.suscripciones(empresa_id,plan_nombre,monto_mensual,inicio,dias_gracia,cancelada,cortesia,cortesia_hasta)
+ values(p_empresa_id,trim(p_plan),v_monto,p_inicio,p_gracia,p_cancelada,v_cortesia,v_hasta)
  on conflict(empresa_id) do update set plan_nombre=excluded.plan_nombre,monto_mensual=excluded.monto_mensual,
- inicio=excluded.inicio,dias_gracia=excluded.dias_gracia,cancelada=excluded.cancelada,cortesia=excluded.cortesia,actualizado_en=now();
+ inicio=excluded.inicio,dias_gracia=excluded.dias_gracia,cancelada=excluded.cancelada,cortesia=excluded.cortesia,cortesia_hasta=excluded.cortesia_hasta,actualizado_en=now();
  insert into public.plataforma_historial(empresa_id,actor,accion,detalle)
- values(p_empresa_id,auth.uid(),'suscripcion',jsonb_build_object('anterior',to_jsonb(anterior),'plan',trim(p_plan),'monto',v_monto,'inicio',p_inicio,'gracia',p_gracia,'cancelada',p_cancelada,'cortesia',v_cortesia));
+ values(p_empresa_id,auth.uid(),'suscripcion',jsonb_build_object('anterior',to_jsonb(anterior),'plan',trim(p_plan),'monto',v_monto,'inicio',p_inicio,'gracia',p_gracia,'cancelada',p_cancelada,'cortesia',v_cortesia,'cortesia_hasta',v_hasta));
 end;
 $$;
-revoke all on function public.plataforma_configurar_suscripcion(uuid,text,integer,date,integer,boolean,boolean) from public,anon;
-grant execute on function public.plataforma_configurar_suscripcion(uuid,text,integer,date,integer,boolean,boolean) to authenticated;
+revoke all on function public.plataforma_configurar_suscripcion(uuid,text,integer,date,integer,boolean,boolean,date) from public,anon;
+grant execute on function public.plataforma_configurar_suscripcion(uuid,text,integer,date,integer,boolean,boolean,date) to authenticated;
 
 create or replace function public.plataforma_registrar_pago(
  p_id uuid,p_empresa_id uuid,p_periodo_inicio date,p_monto integer,p_referencia text,p_fecha_pago date)

@@ -330,6 +330,20 @@ await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortes�
 await db.exec("select public.plataforma_cambiar_acceso('"+ec+"','suspendida','Prueba de suspensión')");
 assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),false);
 await db.exec("select public.plataforma_cambiar_acceso('"+ec+"','autorizada','Fin de la prueba')");
+// Cortesía con fecha de término: opera hasta ese día inclusive y después queda vencida, sin tocar nada a mano.
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Prueba 5 días',0,'"+hoyTxt+"',5,false,true,('"+hoyTxt+"'::date+4))");
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),true);
+assert.equal(await value("select public.estado_servicio('"+ec+"')->>'vencimiento' v"),await value("select ('"+hoyTxt+"'::date+4)::text v"));
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Prueba 5 días',0,('"+hoyTxt+"'::date-10),5,false,true,('"+hoyTxt+"'::date-6))");
+assert.equal(await value("select public.estado_servicio('"+ec+"')->>'estado_pago' v"),'vencida');
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),false);
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Prueba',0,('"+hoyTxt+"'::date-10),5,false,true,'"+hoyTxt+"')");
+assert.equal(await value("select (public.estado_servicio('"+ec+"')->>'operativo')::boolean v"),true);          // el último día todavía opera
+await rejects("select public.plataforma_configurar_suscripcion('"+ec+"','Prueba',0,'"+hoyTxt+"',5,false,true,('"+hoyTxt+"'::date-1))",/antes de su inicio/);
+// Un plan pagado no guarda fecha de término de cortesía aunque llegue una.
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Mensual',25000,'"+hoyTxt+"',5,false,false,('"+hoyTxt+"'::date+4))");
+assert.equal(await value("select (cortesia_hasta is null)::text v from public.suscripciones where empresa_id='"+ec+"'"),'true');
+await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Cortesía socio',0,'"+hoyTxt+"',5,false,true)");
 // Las llamadas antiguas (6 parámetros) siguen funcionando y vuelven a un plan pagado.
 await db.exec("select public.plataforma_configurar_suscripcion('"+ec+"','Mensual',25000,'"+hoyTxt+"',5,false)");
 assert.equal(await value("select (not cortesia and monto_mensual=25000)::text v from public.suscripciones where empresa_id='"+ec+"'"),'true');
