@@ -491,8 +491,15 @@ function calcPresupuesto(p) {
     const gg       = usarGGUtil ? costoDirecto * (p.ggPct||0) / 100 : 0;
     const util     = usarGGUtil ? costoDirecto * (p.utilPct||0) / 100 : 0;
     const subtotal = costoDirecto + gg + util;
-    const iva      = subtotal * 0.19;
-    return { costoDirecto, gg, util, subtotal, iva, total: subtotal + iva };
+    // ivaPct: 19 (afecto) o 0 (exento / sin IVA). Los presupuestos antiguos no lo traen y siguen con 19 %.
+    const ivaPct   = p.ivaPct ?? 19;
+    const iva      = subtotal * ivaPct / 100;
+    return { costoDirecto, gg, util, subtotal, ivaPct, iva, total: subtotal + iva };
+}
+
+function etiquetaIva(pct, corta) {
+    if (!pct) return 'Exento de IVA';
+    return corta ? `IVA ${pct}%` : `IVA (${pct}%)`;
 }
 
 // ════════════════════════════════════════════════════════
@@ -860,8 +867,10 @@ function recalcularResumen() {
     const gg      = usarGGUtil ? costoDirecto * ggPct   / 100 : 0;
     const util    = usarGGUtil ? costoDirecto * utilPct / 100 : 0;
     const sub     = costoDirecto + gg + util;
-    const iva     = sub * 0.19;
+    const ivaPct  = parseFloat(document.getElementById('p-iva').value) || 0;
+    const iva     = sub * ivaPct / 100;
     const total   = sub + iva;
+    document.getElementById('res-iva-label').textContent     = etiquetaIva(ivaPct);
 
     document.getElementById('res-costo-directo').textContent = fmt(costoDirecto);
     document.getElementById('res-gg').textContent            = fmt(gg);
@@ -918,7 +927,8 @@ function guardarPresupuesto() {
     const usarGGUtil = document.getElementById('usar-gg-util').checked;
     const ggPct   = parseFloat(document.getElementById('gg-pct').value)   || 0;
     const utilPct = parseFloat(document.getElementById('util-pct').value) || 0;
-    const { costoDirecto, gg, util, subtotal, iva, total } = calcPresupuesto({ capitulos, ggPct, utilPct, usarGGUtil });
+    const ivaPct  = parseFloat(document.getElementById('p-iva').value) || 0;
+    const { costoDirecto, gg, util, subtotal, iva, total } = calcPresupuesto({ capitulos, ggPct, utilPct, usarGGUtil, ivaPct });
 
     const datos = {
         fecha: document.getElementById('p-fecha').value,
@@ -931,7 +941,7 @@ function guardarPresupuesto() {
             telefono: document.getElementById('cli-telefono').value.trim(),
             direccion, region, comuna,
         },
-        ggPct, utilPct, usarGGUtil, capitulos,
+        ggPct, utilPct, usarGGUtil, ivaPct, capitulos,
         costoDirecto, gg, util, subtotal, iva, total,
         notas: document.getElementById('p-notas').value.trim(),
     };
@@ -980,6 +990,7 @@ function limpiarFormulario() {
     document.getElementById('gg-pct').value   = '15';
     document.getElementById('util-pct').value = '10';
     document.getElementById('usar-gg-util').checked = true;
+    document.getElementById('p-iva').value = '19';
     document.getElementById('fila-gg').classList.remove('hidden');
     document.getElementById('fila-util').classList.remove('hidden');
     document.getElementById('p-fecha').value  = new Date().toISOString().slice(0,10);
@@ -1094,6 +1105,7 @@ function editarPresupuesto(id) {
     document.getElementById('gg-pct').value   = p.ggPct;
     document.getElementById('util-pct').value = p.utilPct;
     document.getElementById('usar-gg-util').checked = p.usarGGUtil !== false;
+    document.getElementById('p-iva').value = String(p.ivaPct ?? 19);
     document.getElementById('fila-gg').classList.toggle('hidden', p.usarGGUtil === false);
     document.getElementById('fila-util').classList.toggle('hidden', p.usarGGUtil === false);
 
@@ -1804,7 +1816,7 @@ function renderDocumentoRF(ot) {
         <div class="flex justify-between px-4 py-2.5 border-b text-sm"><span class="text-slate-600">Gastos Generales (${ot.gg_pct}%)</span><span class="font-semibold">${fmt(ot.gg)}</span></div>
         <div class="flex justify-between px-4 py-2.5 border-b text-sm"><span class="text-slate-600">Utilidades (${ot.util_pct}%)</span><span class="font-semibold">${fmt(ot.util)}</span></div>` : ''}
         <div class="flex justify-between px-4 py-2.5 border-b bg-blue-50 text-sm font-bold text-blue-900"><span>Subtotal Neto</span><span>${fmt(ot.subtotal)}</span></div>
-        <div class="flex justify-between px-4 py-2.5 border-b text-sm"><span class="text-slate-600">IVA (19%)</span><span class="font-semibold">${fmt(ot.iva)}</span></div>
+        <div class="flex justify-between px-4 py-2.5 border-b text-sm"><span class="text-slate-600">${(Number(ot.iva) === 0 && Number(ot.subtotal) > 0) ? 'Exento de IVA' : 'IVA (19%)'}</span><span class="font-semibold">${fmt(ot.iva)}</span></div>
         <div class="flex justify-between px-4 py-3 bg-slate-900 text-base font-black"><span class="text-white">TOTAL</span><span class="text-amber-400">${fmt(ot.total)}</span></div>
     `;
 
@@ -2302,7 +2314,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
     <div class="res-row"><span>Gastos Generales (${p.ggPct}%)</span><span>${M(c.gg)}</span></div>
     <div class="res-row"><span>Utilidades (${p.utilPct}%)</span><span>${M(c.util)}</span></div>` : ''}
     <div class="res-row sub"><span>Subtotal Neto</span><span>${M(c.subtotal)}</span></div>
-    <div class="res-row"><span>I.V.A. (19%)</span><span>${M(c.iva)}</span></div>
+    <div class="res-row"><span>${c.ivaPct ? `I.V.A. (${c.ivaPct}%)` : 'Exento de IVA'}</span><span>${M(c.iva)}</span></div>
     <div class="res-total"><span>Total General</span><span>${M(c.total)}</span></div>
   </div>
   <div class="bottom">
@@ -2469,7 +2481,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
     <div class="res-row"><span>Gastos Generales (${p.ggPct}%)</span><span>${M(c.gg)}</span></div>
     <div class="res-row"><span>Utilidades (${p.utilPct}%)</span><span>${M(c.util)}</span></div>` : ''}
     <div class="res-row sub"><span>Subtotal Neto</span><span>${M(c.subtotal)}</span></div>
-    <div class="res-row"><span>I.V.A. (19%)</span><span>${M(c.iva)}</span></div>
+    <div class="res-row"><span>${c.ivaPct ? `I.V.A. (${c.ivaPct}%)` : 'Exento de IVA'}</span><span>${M(c.iva)}</span></div>
     <div class="res-total"><span>Total Orden de Trabajo</span><span>${M(c.total)}</span></div>
   </div>
   <div class="bottom">
