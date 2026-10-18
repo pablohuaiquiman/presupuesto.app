@@ -379,7 +379,7 @@
                 </div>
 
                 <!-- Metadatos -->
-                <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-slate-50 rounded-xl p-4 border border-slate-200">
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 bg-slate-50 rounded-xl p-4 border border-slate-200">
                     <div><label class="campo-label">N° Presupuesto</label>
                         <input id="p-numero" type="text" readonly class="campo-input bg-slate-100 text-slate-400 cursor-not-allowed"></div>
                     <div><label class="campo-label">Fecha</label>
@@ -400,6 +400,11 @@
                         <select id="p-decimales" class="campo-input" onchange="onCambioDecimales()">
                             <option value="0">Sin decimales</option>
                             <option value="2">Con 2 decimales</option>
+                        </select></div>
+                    <div><label class="campo-label">IVA</label>
+                        <select id="p-iva" class="campo-input" onchange="recalcularResumen()">
+                            <option value="19">Afecto (19%)</option>
+                            <option value="0">Exento / sin IVA</option>
                         </select></div>
                 </div>
 
@@ -501,7 +506,7 @@
                             <span class="font-bold text-blue-900" id="res-subtotal">$ 0</span>
                         </div>
                         <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-                            <span class="text-sm text-slate-600">IVA (19%)</span>
+                            <span class="text-sm text-slate-600" id="res-iva-label">IVA (19%)</span>
                             <span class="font-semibold text-slate-700" id="res-iva">$ 0</span>
                         </div>
                         <div class="flex items-center justify-between px-5 py-4 bg-slate-900">
@@ -1023,9 +1028,9 @@
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261007a"></script>
-<script src="app.js?v=20261007d"></script>
+<script src="app.js?v=20261018a"></script>
 <script src="platform.js?v=20261007b"></script>
-<script src="proyectos.js?v=20261007b"></script>
+<script src="proyectos.js?v=20261018a"></script>
 <script src="compras.js?v=20261007b"></script>
 </body>
 </html>
