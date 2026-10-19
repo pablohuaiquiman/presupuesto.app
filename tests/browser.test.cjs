@@ -178,6 +178,24 @@ try {
  const pp=await abrirPagina([presupuesto]);
  await pp.locator('#pl-mode-empresa').click();
  await pp.locator('[data-tab="tab-adjudicados"]').click();
+ // Aprobación sin firma con la OC del cliente
+ await pp.getByRole('button',{name:'📄 Aprobado con OC del cliente (sin firma)'}).click();
+ await pp.locator('#aprob-oc-numero').fill('OC-CLI-778');
+ await pp.locator('#aprob-oc-fecha').fill('2026-09-12');
+ await pp.getByRole('button',{name:'Registrar aprobación'}).click();
+ await pp.getByText('✔ Aprobado con OC del cliente N° OC-CLI-778').waitFor();
+ assert.equal(await pp.getByRole('button',{name:'Firmar aquí'}).count(),0);
+ assert.deepEqual(await pp.evaluate(()=>{const a=presupuestos.find(x=>x.id==='pre-1').aprobacionCliente;return [a.tipo,a.numeroOC,a.fecha,a.adjuntoPath];}),['orden_compra','OC-CLI-778','2026-09-12',null]);
+ // La OT nueva también se aprueba con la OC (viene precargada desde el contrato)
+ await pp.evaluate(()=>generarOrdenTrabajo('pre-1'));
+ await pp.locator('[data-tab="tab-ot"]').click();
+ await pp.getByRole('button',{name:'📄 Aprobada con OC'}).click();
+ assert.equal(await pp.locator('#aprob-oc-numero').inputValue(),'OC-CLI-778');
+ await pp.getByRole('button',{name:'Registrar aprobación'}).click();
+ await pp.locator('#ot-tbody').getByText('Aprobada con OC').waitFor();
+ assert.deepEqual(await pp.evaluate(()=>{const ot=presupuestos.find(x=>x.id==='pre-1').ordenesTrabajo.at(-1);return [ot.estado,ot.aprobacionCliente.numeroOC];}),['firmada','OC-CLI-778']);
+ assert.equal(await pp.locator('#ot-tbody').getByRole('button',{name:'Firmar',exact:true}).count(),0);
+ await pp.locator('[data-tab="tab-adjudicados"]').click();
  await pp.getByRole('button',{name:'Pasar a ejecución (centro de costo)'}).click();
  await pp.getByText('Gastos vs costo directo presupuestado').waitFor();
  assert.equal(await pp.evaluate(()=>window.fixture.tables.proyectos.length),1);
@@ -235,7 +253,7 @@ try {
  await pp.evaluate(()=>{document.getElementById('toast').style.display='none';});
  await pp.screenshot({path:'tests/artifacts/proyecto-desktop.png',fullPage:true,animations:"disabled"});
  await pp.getByRole('button',{name:'Estados de pago',exact:true}).click();
- await pp.locator('tbody tr').first().click();
+ await pp.locator('#pr-root tbody tr').first().click();
  await pp.setViewportSize({width:390,height:844});
  await pp.screenshot({path:'tests/artifacts/proyecto-mobile.png',fullPage:true,animations:"disabled"});
  assert.equal(await pp.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Desbordamiento horizontal en móvil (proyectos)');

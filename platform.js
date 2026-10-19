@@ -84,6 +84,9 @@ const Plataforma = (() => {
         acceso=data;
         if (reactivada) {
             await cargarDB();
+            // Proyectos (estados de pago) y Compras solo se cargan al arrancar si la empresa podía operar.
+            await Proyectos.cargar();
+            await Compras.cargar();
             actualizarListaClientes();
             actualizarBadges();
         }

@@ -1198,6 +1198,7 @@ async function abrirModalContrato(id) {
     if (!p) return;
     if (p.estado !== 'adjudicado') return toast('Primero aprueba el presupuesto', 'info');
     if (p.firma) return toast('Este contrato ya está firmado por el cliente', 'info');
+    if (p.aprobacionCliente) return toast('Este contrato ya fue aprobado con la OC del cliente', 'info');
     contratoActualId = id;
     monedaFmt = p.moneda || 'CLP';
     decimalesFmt = p.decimales ?? decimalesPorDefecto(p.moneda || 'CLP');
@@ -1269,7 +1270,7 @@ function confirmarContrato() {
 async function generarLinkFirmaAdjudicacion(presId) {
     if (!supa) return toast('Falta configurar la anon key de Supabase en app.js', 'error');
     const p = presupuestos.find(x => x.id === presId);
-    if (!p || p.estado !== 'adjudicado' || p.firma) return;
+    if (!p || p.estado !== 'adjudicado' || p.firma || p.aprobacionCliente) return;
     p.firmaRemotaId ||= uid();
     const c = calcPresupuesto(p);
 
@@ -1359,6 +1360,18 @@ function renderAdjudicados() {
                         <span class="text-xs font-semibold text-emerald-700">✔ Firmado por el cliente</span>
                         <img src="${p.firma.firmaB64}" alt="Firma" class="h-8 opacity-60">
                     </div>`
+                    : p.aprobacionCliente
+                    ? `<div class="border-t border-slate-100 pt-2 space-y-1.5">
+                        <p class="text-xs font-semibold text-emerald-700">✔ Aprobado con OC del cliente N° ${esc(p.aprobacionCliente.numeroOC)} · ${fmtFecha(p.aprobacionCliente.fecha)}</p>
+                        ${p.aprobacionCliente.nota ? `<p class="text-xs text-slate-500">${esc(p.aprobacionCliente.nota)}</p>` : ''}
+                        <div class="flex gap-2">
+                            ${p.aprobacionCliente.adjuntoPath ? `<button onclick="event.stopPropagation(); Proyectos.verArchivo('${esc(p.aprobacionCliente.adjuntoPath)}')"
+                                class="flex-1 text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Ver OC</button>` : ''}
+                            <button onclick="event.stopPropagation(); quitarAprobacionOC('${p.id}')"
+                                title="Quitar la aprobación con OC"
+                                class="text-xs px-3 py-1.5 border border-slate-300 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition-colors">Quitar</button>
+                        </div>
+                    </div>`
                     : `<div class="border-t border-slate-100 pt-2 space-y-2">
                         <p class="text-xs font-semibold text-amber-700">${p.firmaRemotaId ? '⏳ Link enviado — esperando firma del cliente' : '✍ Firma del cliente pendiente'}</p>
                         <div class="flex gap-2">
@@ -1369,6 +1382,8 @@ function renderAdjudicados() {
                             ${p.firmaRemotaId ? `<button onclick="event.stopPropagation(); sincronizarFirmasRemotas()" title="Revisar si el cliente ya firmó"
                                 class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">🔄</button>` : ''}
                         </div>
+                        <button onclick="event.stopPropagation(); abrirAprobacionOC('${p.id}')"
+                            class="w-full text-xs px-3 py-1.5 border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg font-semibold transition-colors">📄 Aprobado con OC del cliente (sin firma)</button>
                     </div>`}
                 <button onclick="event.stopPropagation(); revertirAdjudicacion('${p.id}')"
                     class="w-full text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg py-1 font-medium transition-colors">
@@ -1387,6 +1402,9 @@ function revertirAdjudicacion(id) {
 
     p.estado = 'enviado';
     p.firma = null;
+    const adjunto = p.aprobacionCliente?.adjuntoPath;
+    delete p.aprobacionCliente;
+    borrarAdjuntoOCSiHuerfano(adjunto);
     delete p.fechaAdjudicacion;
     delete p.firmaRemotaId;
     guardarDB();
@@ -1394,6 +1412,92 @@ function revertirAdjudicacion(id) {
     renderAdjudicados();
     renderEnviados();
     toast(`Presupuesto ${p.numero} vuelto a Enviados`, 'info');
+}
+
+// ── Aprobación sin firma: el cliente envía su propia orden de compra ──
+// Sirve para el contrato adjudicado (presupuesto) y para cada orden de trabajo. Una OT puede
+// reutilizar la OC (y su archivo) del presupuesto, por eso el archivo solo se borra si nadie más lo usa.
+let aprobacionOcCtx = null; // { presId, otId }
+function objetivoAprobacionOC(ctx) {
+    const p = presupuestos.find(x => x.id === ctx?.presId);
+    if (!p) return {};
+    const ot = ctx.otId ? p.ordenesTrabajo.find(x => x.id === ctx.otId) : null;
+    if (ctx.otId && !ot) return {};
+    return { p, ot, doc: ot || p };
+}
+function borrarAdjuntoOCSiHuerfano(path) {
+    if (!path || !supa) return;
+    const enUso = presupuestos.some(p => p.aprobacionCliente?.adjuntoPath === path
+        || p.ordenesTrabajo.some(ot => ot.aprobacionCliente?.adjuntoPath === path));
+    if (!enUso) supa.storage.from('proyectos').remove([path]);
+}
+
+function abrirAprobacionOC(presId, otId = null) {
+    const { p, ot } = objetivoAprobacionOC({ presId, otId });
+    if (!p) return;
+    if (ot ? ot.estado === 'firmada' : (p.estado !== 'adjudicado' || p.firma)) return;
+    aprobacionOcCtx = { presId, otId };
+    const previa = ot ? p.aprobacionCliente : null; // la OT parte con la OC del contrato, si existe
+    document.getElementById('aprob-oc-subtitulo').textContent = `${ot ? ot.numero + ' — ' : ''}${p.numero} — ${p.cliente.nombre}`;
+    document.getElementById('aprob-oc-numero').value = previa?.numeroOC || '';
+    document.getElementById('aprob-oc-fecha').value = previa?.fecha || new Date().toISOString().slice(0,10);
+    document.getElementById('aprob-oc-archivo').value = '';
+    document.getElementById('aprob-oc-nota').value = '';
+    document.getElementById('aprob-oc-adjunto-previo').classList.toggle('hidden', !previa?.adjuntoPath);
+    abrirModal('modal-aprobacion-oc');
+}
+
+async function confirmarAprobacionOC(e) {
+    e.preventDefault();
+    const { p, ot, doc } = objetivoAprobacionOC(aprobacionOcCtx);
+    if (!p || (ot ? ot.estado === 'firmada' : (p.estado !== 'adjudicado' || p.firma))) return cerrarModal('modal-aprobacion-oc');
+    const numeroOC = document.getElementById('aprob-oc-numero').value.trim();
+    const fecha    = document.getElementById('aprob-oc-fecha').value;
+    if (!numeroOC || !fecha) return toast('Indica el N° y la fecha de la OC del cliente', 'error');
+    const archivo = document.getElementById('aprob-oc-archivo').files[0];
+    const boton = document.getElementById('aprob-oc-guardar');
+    boton.disabled = true;
+    try {
+        // Sin archivo nuevo, la OT reutiliza el respaldo del contrato si es la misma OC.
+        let adjuntoPath = ot && p.aprobacionCliente?.numeroOC === numeroOC ? p.aprobacionCliente.adjuntoPath || null : null;
+        if (archivo) {
+            if (!supa || !empresaActual) throw new Error('Para adjuntar la OC se necesita la conexión con Supabase');
+            adjuntoPath = await Proyectos.subirArchivo(archivo, { empresa_id: empresaActual.id, id: `presupuestos/${p.id}` }, 'oc_cliente');
+        }
+        doc.aprobacionCliente = {
+            tipo: 'orden_compra', numeroOC, fecha, adjuntoPath,
+            nota: document.getElementById('aprob-oc-nota').value.trim(),
+            registradoPor: miPerfil?.nombre || null, registradoEn: new Date().toISOString(),
+        };
+        if (ot) ot.estado = 'firmada'; // cuenta como aceptada por el cliente
+        guardarDB();
+        actualizarBadges();
+        renderAdjudicados();
+        renderOrdenesTrabajo();
+        renderSelectFirma();
+        cerrarModal('modal-aprobacion-oc');
+        toast(`${ot ? ot.numero : p.numero} aprobado con la OC N° ${numeroOC} del cliente`, 'success');
+    } catch (error) {
+        toast(error.message, 'error');
+    } finally {
+        boton.disabled = false;
+    }
+}
+
+function quitarAprobacionOC(presId, otId = null) {
+    const { p, ot, doc } = objetivoAprobacionOC({ presId, otId });
+    if (!doc?.aprobacionCliente) return;
+    if (!confirm(`¿Quitar la aprobación con OC N° ${doc.aprobacionCliente.numeroOC} de ${ot ? ot.numero : p.numero}? Volverá a quedar pendiente la firma del cliente.`)) return;
+    const path = doc.aprobacionCliente.adjuntoPath;
+    delete doc.aprobacionCliente;
+    if (ot) { ot.estado = 'pendiente'; ot.firma = null; }
+    borrarAdjuntoOCSiHuerfano(path);
+    guardarDB();
+    actualizarBadges();
+    renderAdjudicados();
+    renderOrdenesTrabajo();
+    renderSelectFirma();
+    toast('Aprobación con OC quitada', 'info');
 }
 
 // ── Rechazados (archivados bajo Adjudicados) ─────────────
@@ -1487,12 +1591,15 @@ function eliminarOrdenTrabajo(presId, id) {
     const ot = p?.ordenesTrabajo.find(x => x.id === id);
     if (!p || !ot) return;
 
-    const msg = ot.estado === 'firmada'
+    const msg = ot.aprobacionCliente
+        ? `La orden de trabajo ${ot.numero} está aprobada con la OC N° ${ot.aprobacionCliente.numeroOC} del cliente. ¿Eliminarla de todas formas?`
+        : ot.estado === 'firmada'
         ? `La orden de trabajo ${ot.numero} ya está firmada por el cliente. ¿Eliminarla de todas formas? Se perderá la firma registrada.`
         : `¿Eliminar la orden de trabajo ${ot.numero}?`;
     if (!confirm(msg)) return;
 
     p.ordenesTrabajo = p.ordenesTrabajo.filter(x => x.id !== id);
+    borrarAdjuntoOCSiHuerfano(ot.aprobacionCliente?.adjuntoPath);
     guardarDB();
     actualizarBadges();
     renderOrdenesTrabajo();
@@ -1518,7 +1625,10 @@ function renderOrdenesTrabajo() {
             </td>
             <td class="px-4 py-3 text-sm text-slate-500 hidden sm:table-cell">${fmtFecha(ot.fecha)}</td>
             <td class="px-4 py-3 text-center">
-                ${ot.estado === 'firmada'
+                ${ot.aprobacionCliente
+                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-teal-100 text-teal-800 rounded-full text-xs font-bold" title="OC del cliente N° ${esc(ot.aprobacionCliente.numeroOC)} · ${fmtFecha(ot.aprobacionCliente.fecha)}"><span class="w-1.5 h-1.5 bg-teal-500 rounded-full"></span>Aprobada con OC</span>
+                       <p class="text-xs text-slate-400 mt-0.5">N° ${esc(ot.aprobacionCliente.numeroOC)}</p>`
+                    : ot.estado === 'firmada'
                     ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold"><span class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>Firmada</span>`
                     : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold"><span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>Pendiente firma</span>`}
             </td>
@@ -1534,7 +1644,17 @@ function renderOrdenesTrabajo() {
                         ? `<button onclick="abrirModalOT('${p.id}','${ot.id}')"
                             class="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition-colors">Firmar</button>
                         <button onclick="generarLinkFirmaOT('${p.id}','${ot.id}')"
-                            class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">🔗 Link firma</button>`
+                            class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors">🔗 Link firma</button>
+                        <button onclick="abrirAprobacionOC('${p.id}','${ot.id}')" title="El cliente aprobó enviando su propia orden de compra"
+                            class="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 hover:bg-teal-50 rounded-lg font-bold transition-colors">📄 Aprobada con OC</button>`
+                        : ''}
+                    ${ot.aprobacionCliente?.adjuntoPath
+                        ? `<button onclick="Proyectos.verArchivo('${esc(ot.aprobacionCliente.adjuntoPath)}')"
+                            class="text-xs px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Ver OC</button>`
+                        : ''}
+                    ${ot.aprobacionCliente
+                        ? `<button onclick="quitarAprobacionOC('${p.id}','${ot.id}')" title="Quitar la aprobación con OC"
+                            class="text-xs px-3 py-1.5 border border-slate-300 text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition-colors">Quitar OC</button>`
                         : ''}
                     <button onclick="eliminarOrdenTrabajo('${p.id}','${ot.id}')"
                         class="text-xs px-3 py-1.5 border border-red-300 text-red-500 hover:bg-red-50 rounded-lg font-medium transition-colors">Eliminar</button>
@@ -1598,7 +1718,7 @@ async function sincronizarFirmasRemotas() {
     const pendientes = presupuestos.flatMap(p => p.ordenesTrabajo
         .filter(ot => ot.remota && ot.estado === 'pendiente')
         .map(ot => ot));
-    const adjPendientes = presupuestos.filter(p => p.estado === 'adjudicado' && p.firmaRemotaId && !p.firma);
+    const adjPendientes = presupuestos.filter(p => p.estado === 'adjudicado' && p.firmaRemotaId && !p.firma && !p.aprobacionCliente);
     if (!pendientes.length && !adjPendientes.length) return toast('No hay firmas remotas pendientes por sincronizar', 'info');
 
     let actualizadas = 0;
@@ -1991,7 +2111,7 @@ function descartarFoto() {
 }
 function renderSelectFirma() {
     const sel = document.getElementById('firma-presupuesto-id');
-    const sin = ordenarRecientes(presupuestos.filter(p=>!p.firma), p => p.fecha);
+    const sin = ordenarRecientes(presupuestos.filter(p=>!p.firma && !p.aprobacionCliente), p => p.fecha);
     sel.innerHTML='<option value="">— Seleccione un presupuesto —</option>'+
         sin.map(p=>`<option value="${p.id}">${esc(p.numero)} · ${esc(p.cliente.nombre)}</option>`).join('');
 }
@@ -2084,7 +2204,7 @@ function cerrarModal(id) {
     document.body.style.overflow='';
 }
 document.addEventListener('click', e=>{
-    ['modal-contrato','modal-catalogo','modal-ot','modal-link-firma'].forEach(id=>{
+    ['modal-contrato','modal-catalogo','modal-ot','modal-link-firma','modal-aprobacion-oc'].forEach(id=>{
         const el=document.getElementById(id);
         if(el && e.target===el) {
             cerrarModal(id);
@@ -2448,7 +2568,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
   <div class="ppto-ref">
     <div class="ppto-lbl">N° Orden de Trabajo</div>
     <div class="ppto-num">${h(ot.numero)}</div>
-    <div class="ppto-sub">Fecha: ${FL(ot.fecha)}<br>Presupuesto: ${h(p.numero)}<br><span class="estado-badge ${ot.estado==='firmada'?'estado-firmada':'estado-pendiente'}">${ot.estado==='firmada'?'Firmada':'Pendiente de firma'}</span></div>
+    <div class="ppto-sub">Fecha: ${FL(ot.fecha)}<br>Presupuesto: ${h(p.numero)}<br><span class="estado-badge ${ot.estado==='firmada'?'estado-firmada':'estado-pendiente'}">${ot.aprobacionCliente?'Aprobada con OC':ot.estado==='firmada'?'Firmada':'Pendiente de firma'}</span></div>
   </div>
 </div>
 <div class="body">
@@ -2494,10 +2614,11 @@ tbody td{padding:5px 8px;vertical-align:middle}
     </div>
     <div class="firma-box">
       ${ot.firma?.firmaB64?`<img src="${ot.firma.firmaB64}" alt="Firma cliente" style="height:50px;margin:0 auto 4px;display:block;">`:''}
+      ${ot.aprobacionCliente?`<div style="height:50px;margin:0 auto 4px;display:flex;flex-direction:column;justify-content:flex-end;font-size:10px;font-weight:700;color:#0f766e;">Aprobada mediante OC del cliente<br>N° ${h(ot.aprobacionCliente.numeroOC)} · ${FL(ot.aprobacionCliente.fecha)}</div>`:''}
       <div class="firma-lin"></div>
       <div class="firma-emp">${h(p.cliente.nombre)}</div>
       <div class="firma-nom">&nbsp;</div>
-      <div class="firma-car">Recibí conforme — Cliente</div>
+      <div class="firma-car">${ot.aprobacionCliente ? 'Aceptación por orden de compra — Cliente' : 'Recibí conforme — Cliente'}</div>
     </div>
   </div>
 </div>

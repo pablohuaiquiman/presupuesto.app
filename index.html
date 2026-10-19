@@ -959,6 +959,39 @@
     </div>
 </div>
 
+<!-- ═══ MODAL · APROBACIÓN CON ORDEN DE COMPRA DEL CLIENTE (sin firma) ═══ -->
+<div id="modal-aprobacion-oc" role="dialog" style="display:none" class="modal-overlay fixed inset-0 bg-black/60 z-50 items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div class="flex items-center justify-between px-6 py-4 border-b">
+            <div>
+                <h3 class="text-lg font-bold text-slate-800">📄 Aprobado con OC del cliente</h3>
+                <p id="aprob-oc-subtitulo" class="text-xs text-slate-500"></p>
+            </div>
+            <button onclick="cerrarModal('modal-aprobacion-oc')" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <form onsubmit="confirmarAprobacionOC(event)" class="p-6 space-y-3">
+            <p class="text-sm text-slate-500">El cliente aprobó enviando su propia orden de compra. Ya no se le pedirá firma.</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="campo-label">N° OC del cliente *</label>
+                    <input id="aprob-oc-numero" required maxlength="60" class="campo-input"></div>
+                <div><label class="campo-label">Fecha de la OC *</label>
+                    <input id="aprob-oc-fecha" type="date" required class="campo-input"></div>
+            </div>
+            <div><label class="campo-label">Respaldo (PDF o imagen, opcional)</label>
+                <input id="aprob-oc-archivo" type="file" accept="application/pdf,image/*" class="campo-input text-xs">
+                <p id="aprob-oc-adjunto-previo" class="hidden text-xs text-slate-500 mt-1">Si no adjuntas otro archivo, se usa el de la OC registrada en el contrato.</p></div>
+            <div><label class="campo-label">Observación</label>
+                <textarea id="aprob-oc-nota" rows="2" maxlength="500" class="campo-input"></textarea></div>
+            <div class="grid grid-cols-2 gap-3 pt-1">
+                <button type="button" onclick="cerrarModal('modal-aprobacion-oc')" class="btn-secondary py-2">Cancelar</button>
+                <button id="aprob-oc-guardar" type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl transition-colors">Registrar aprobación</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- ═══ TOAST ═══ -->
 <div id="toast" class="fixed bottom-6 right-6 z-[60] translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
     <div class="flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl min-w-60 max-w-sm" id="toast-inner">
@@ -1028,9 +1061,9 @@
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261007a"></script>
-<script src="app.js?v=20261018a"></script>
-<script src="platform.js?v=20261007b"></script>
-<script src="proyectos.js?v=20261018a"></script>
+<script src="app.js?v=20261019b"></script>
+<script src="platform.js?v=20261019a"></script>
+<script src="proyectos.js?v=20261019a"></script>
 <script src="compras.js?v=20261007b"></script>
 </body>
 </html>
