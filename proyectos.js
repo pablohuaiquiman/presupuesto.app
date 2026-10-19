@@ -10,11 +10,17 @@ const Proyectos = (() => {
     const COLOR_EDP = { borrador: 'bg-slate-100 text-slate-700', presentado: 'bg-amber-100 text-amber-800', aprobado: 'bg-blue-100 text-blue-800', pagado: 'bg-emerald-100 text-emerald-800' };
     const ESTADOS_GASTO = { pendiente: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
     const COLOR_GASTO = { pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-emerald-100 text-emerald-800', rechazado: 'bg-red-100 text-red-700' };
-    const LINEAS = ['cd', 'gg', 'util', 'sub', 'anticipo', 'retencion', 'neto'];
+    const LINEAS = ['cd', 'gg', 'util', 'sub', 'anticipo', 'retencion', 'descuento', 'neto'];
 
     let disponible = false, proyectos = [], edps = [], gastos = [], perfiles = [];
-    let actualId = null, vista = 'resumen', edpSelId = null, cantidades = null;
+    let actualId = null, vista = 'resumen', edpSelId = null, cantidades = null, ajusteEdp = null;
     let filtroCat = '', filtroEstado = '', rechazandoId = null, ocupado = false;
+    // Varios respaldos por gasto (columna proyecto_gastos.adjuntos). Se apaga si la migración aún no está aplicada.
+    const MAX_ADJUNTOS = 10;
+    const AVISO_MIGRACION = 'Para varios respaldos por gasto falta aplicar la migración 202610190001_gastos_adjuntos.sql.';
+    let conAdjuntos = true;
+    const adjuntosDe = x => x.adjuntos?.length ? x.adjuntos : (x.adjunto_path ? [x.adjunto_path] : []);
+    const faltaColumnaAdjuntos = error => error.code === 'PGRST204' || /adjuntos/.test(error.message || '');
 
     const $ = id => document.getElementById(id);
     const h = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -45,8 +51,11 @@ const Proyectos = (() => {
 
     // ── Cálculo del estado de pago ────────────────────────
     // Columnas como la plantilla: contrato, acumulado, anterior (EP previo congelado) y período.
-    function calcularEDP(p, config, previo, cants) {
+    // ajuste: descuento neto que aplica el mandante en este EP (multas, trabajos no aceptados, etc.).
+    // Se acumula como el anticipo y la retención, así el EP siguiente lo arrastra en "anterior".
+    function calcularEDP(p, config, previo, cants, ajuste = null) {
         const dec = decimales(p), r = n => redondear(n, dec);
+        const descuento = r(Math.max(0, +ajuste?.monto || 0));
         const prevItems = new Map((previo?.items || []).map(i => [i.itemId, i]));
         const items = [];
         p.capitulos.forEach(cap => cap.items.forEach(it => {
@@ -71,13 +80,15 @@ const Proyectos = (() => {
         const anticipo = r(+config?.anticipo_monto || 0);
         const retPct = +config?.retencion_pct || 0;
         const amortizar = sub => contratoBase.sub <= 0 ? 0 : (sub >= contratoBase.sub ? anticipo : r(anticipo * sub / contratoBase.sub));
-        const cerrar = l => ({ ...l, neto: r(l.sub - l.anticipo - l.retencion) });
-        const contrato = cerrar({ ...contratoBase, anticipo, retencion: r(contratoBase.sub * retPct / 100) });
+        const cerrar = l => ({ ...l, neto: r(l.sub - l.anticipo - l.retencion - l.descuento) });
+        const contrato = cerrar({ ...contratoBase, anticipo, retencion: r(contratoBase.sub * retPct / 100), descuento: 0 });
         const acumBase = columna(r(items.reduce((s, i) => s + i.montoAcum, 0)));
-        const acum = cerrar({ ...acumBase, anticipo: amortizar(acumBase.sub), retencion: r(acumBase.sub * retPct / 100) });
+        const acum = cerrar({ ...acumBase, anticipo: amortizar(acumBase.sub), retencion: r(acumBase.sub * retPct / 100),
+            descuento: r((previo?.totales?.acum?.descuento || 0) + descuento) });
         const ant = Object.fromEntries(LINEAS.map(k => [k, previo?.totales?.acum?.[k] || 0]));
         const per = Object.fromEntries(LINEAS.map(k => [k, r(acum[k] - ant[k])]));
         return { items, totales: cierreTributario({ contrato, acum, ant, per, ggPct, utilPct, retPct, anticipoMonto: anticipo,
+            descuentoMotivo: descuento ? String(ajuste?.motivo || '').trim().slice(0, 200) : '',
             pctAvance: contratoBase.sub > 0 ? acumBase.sub / contratoBase.sub * 100 : 0, moneda: p.moneda || 'CLP', decimales: dec }, config, dec) };
     }
     // Devolución de las retenciones acumuladas al terminar la obra.
@@ -125,6 +136,7 @@ const Proyectos = (() => {
         const error = pr.error || ed.error || ga.error || pe.error;
         if (error) toast('No se pudieron cargar los proyectos: ' + error.message, 'error');
         proyectos = pr.data || []; edps = ed.data || []; gastos = ga.data || []; perfiles = pe.data || [];
+        if (gastos.length) conAdjuntos = 'adjuntos' in gastos[0];
         actualizarBadge();
     }
     function actualizarBadge() {
@@ -363,7 +375,7 @@ const Proyectos = (() => {
             const ultimo = edpsDe(pr.id).filter(x => x.tipo === 'avance' && x.estado !== 'borrador').at(-1);
             return calcularDevolucion(p, pr.config, ultimo);
         }
-        return calcularEDP(p, pr.config, previoDe(pr, e), cantidades);
+        return calcularEDP(p, pr.config, previoDe(pr, e), cantidades, ajusteEdp);
     }
 
     function detalleEdpHtml(pr, p, e) {
@@ -387,7 +399,17 @@ const Proyectos = (() => {
             ${campo('N° OC', `<input id="pr-edp-oc" class="campo-input mt-1" maxlength="40" value="${h(e.oc_numero ?? pr.config?.oc_numero ?? '')}" ${dis}>`)}
             ${campo('N° HES', `<input id="pr-edp-hes" class="campo-input mt-1" maxlength="40" value="${h(e.hes_numero || '')}" ${dis}>`)}
             ${campo('Observaciones', `<input id="pr-edp-obs" class="campo-input mt-1" maxlength="300" value="${h(e.obs || '')}" ${dis}>`)}
-        </div>`;
+            ${e.tipo === 'avance' ? `${campo('Descuento del mandante (neto)', `<input id="pr-edp-desc" inputmode="decimal" placeholder="0" class="campo-input mt-1" value="${h(editable ? (ajusteEdp?.monto || '') : (e.totales?.per?.descuento || ''))}" oninput="Proyectos.editarDescuento()" ${dis}>`)}
+            <div class="sm:col-span-1 lg:col-span-3">${campo('Motivo del descuento', `<input id="pr-edp-desc-motivo" maxlength="200" placeholder="Ej: multa por atraso, partida no aceptada" class="campo-input mt-1" value="${h(editable ? (ajusteEdp?.motivo || '') : (e.totales?.descuentoMotivo || ''))}" oninput="Proyectos.editarDescuento()" ${dis}>`)}</div>` : ''}
+        </div>
+        ${e.estado === 'presentado' ? '<p class="text-xs text-slate-500 mt-2">Si el mandante descuenta o corrige algo, usa "Devolver a borrador", ajusta los montos o el descuento y vuelve a presentarlo.</p>' : ''}`;
+    }
+    function editarDescuento() {
+        const pr = actual(), p = pr && presupuestoDe(pr), e = edps.find(x => x.id === edpSelId);
+        if (!p || !e || e.estado !== 'borrador') return;
+        const leer = p.moneda === 'UF' ? numeroDecimal : numero; // en $ el punto es separador de miles
+        ajusteEdp = { monto: Math.max(0, leer($('pr-edp-desc')?.value)), motivo: $('pr-edp-desc-motivo')?.value || '' };
+        $('pr-edp-resumen').innerHTML = resumenEdpHtml(p, calculoVigente(pr, p, e).totales);
     }
 
     function itemsHtml(p, items, editable) {
@@ -424,6 +446,7 @@ const Proyectos = (() => {
             fila('Subtotal neto', 'sub', true),
             fila('Descuento anticipo', 'anticipo'),
             fila(`Retención (${fmtPct(t.retPct)})`, 'retencion'),
+            t.acum?.descuento ? fila(`Descuento mandante${t.descuentoMotivo ? `<span class="block text-xs text-slate-400">${h(t.descuentoMotivo)}</span>` : ''}`, 'descuento') : '',
             fila('Total neto', 'neto', true),
         ].join('');
         const imp = t.documento === 'exenta' ? '' : `<div class="flex justify-between py-1"><span>${t.documento === 'boleta_honorarios' ? 'Retención boleta' : 'IVA'} (${fmtPct(t.tasa)})</span><span>${t.documento === 'boleta_honorarios' ? '− ' : ''}${fmtM(t.impuesto, p)}</span></div>`;
@@ -474,6 +497,7 @@ const Proyectos = (() => {
         cantidades = e.estado === 'borrador' && e.tipo === 'avance'
             ? new Map((e.items?.length ? e.items : calcularEDP(presupuestoDe(pr), pr.config, previoDe(pr, e), null).items).map(i => [i.itemId, i.cantAcum]))
             : null;
+        ajusteEdp = { monto: e.totales?.per?.descuento || 0, motivo: e.totales?.descuentoMotivo || '' };
         render();
         setTimeout(() => document.getElementById('pr-edp-resumen')?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
     }
@@ -485,7 +509,7 @@ const Proyectos = (() => {
         if (!item) return;
         const v = numeroDecimal(input.value);
         cantidades.set(itemId, input.dataset.modo === 'pct' ? (+item.cantidad || 0) * v / 100 : v);
-        const calc = calcularEDP(p, pr.config, previoDe(pr, e), cantidades);
+        const calc = calcularEDP(p, pr.config, previoDe(pr, e), cantidades, ajusteEdp);
         const i = calc.items.find(x => x.itemId === itemId);
         const fila = document.querySelector(`[data-fila="${CSS.escape(itemId)}"]`);
         if (fila && i) {
@@ -539,8 +563,10 @@ const Proyectos = (() => {
         const calc = calculoVigente(pr, p, e);
         if (nuevoEstado === 'presentado') {
             if (!(calc.totales.per?.neto > 0) && !(calc.totales.per?.sub > 0)) return toast('El estado de pago no tiene avance en este período', 'error');
-            if (!confirm(`¿Presentar el estado de pago N° ${e.numero} por ${fmtM(calc.totales.aPagar, p)}? Después no podrás modificar los montos.`)) return;
+            if (!confirm(`¿Presentar el estado de pago N° ${e.numero} por ${fmtM(calc.totales.aPagar, p)}? Mientras el mandante no lo apruebe podrás devolverlo a borrador para corregir montos o descuentos.`)) return;
         }
+        if ((calc.totales.per?.neto || 0) < 0) return toast('El descuento del mandante supera el neto de este estado de pago', 'error');
+        if ((calc.totales.per?.descuento || 0) > 0 && !calc.totales.descuentoMotivo) return toast('Indica el motivo del descuento del mandante', 'error');
         const cambios = { items: calc.items, totales: calc.totales, fecha_presentacion: $('pr-edp-fecha')?.value || null,
             oc_numero: $('pr-edp-oc')?.value.trim() || null, hes_numero: $('pr-edp-hes')?.value.trim() || null, obs: $('pr-edp-obs')?.value.trim() || null };
         if (nuevoEstado) cambios.estado = nuevoEstado;
@@ -626,14 +652,20 @@ const Proyectos = (() => {
             ${campo('Proveedor', `<input id="pr-g-prov" maxlength="160" class="campo-input mt-1">`)}
             ${campo('Documento', `<select id="pr-g-tipodoc" class="campo-input mt-1">${opciones(TIPOS_DOC, 'boleta')}</select>`)}
             ${campo('N° documento', `<input id="pr-g-numdoc" maxlength="40" class="campo-input mt-1">`)}
-            <div class="sm:col-span-2">${campo('Respaldo (foto de boleta/factura o PDF)', `<input id="pr-g-archivo" type="file" accept="image/*,application/pdf" class="campo-input mt-1 text-xs">`)}</div>
+            <div class="sm:col-span-2">${campo(`Respaldos (fotos de boleta/factura/transferencia o PDF, hasta ${MAX_ADJUNTOS})`, `<input id="pr-g-archivo" type="file" multiple accept="image/*,application/pdf" class="campo-input mt-1 text-xs">`)}</div>
             <div class="flex items-end"><button type="submit" class="w-full text-sm px-3 py-2.5 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white">Registrar gasto</button></div>
             <p class="sm:col-span-2 lg:col-span-4 text-xs text-slate-500">Queda pendiente hasta que lo apruebe el administrador del proyecto (${h(nombrePerfil(pr.administrador_id))}).</p>
         </form>`) : '';
         const filas = filtrados.map(x => {
             const propio = x.registrado_por === miPerfil?.id;
+            const editable = g || (propio && x.estado === 'pendiente'); // igual que el trigger validar_gasto
+            const adj = adjuntosDe(x);
+            const respaldos = adj.map((path, i) => `<span class="inline-flex items-stretch">${btn(adj.length > 1 ? `Respaldo ${i + 1}` : 'Respaldo', `Proyectos.verArchivo('${h(path)}')`, `border border-slate-300 text-slate-700 hover:bg-slate-50${editable ? ' rounded-r-none' : ''}`)}${editable
+                ? `<button type="button" title="Quitar este respaldo" onclick="Proyectos.quitarRespaldo('${x.id}',${i})" class="text-xs px-2 rounded-r-lg border border-l-0 border-slate-300 text-slate-400 hover:text-red-600 hover:bg-red-50">×</button>` : ''}</span>`).join('');
+            const agregar = editable && pr.estado === 'activo' && adj.length < MAX_ADJUNTOS
+                ? `<label class="text-xs px-3 py-2 rounded-lg font-bold transition-colors border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer">+ Respaldo<input type="file" multiple accept="image/*,application/pdf" class="hidden" onchange="Proyectos.agregarRespaldos('${x.id}',this)"></label>` : '';
             const acciones = [
-                x.adjunto_path ? btn('Respaldo', `Proyectos.verArchivo('${h(x.adjunto_path)}')`, 'border border-slate-300 text-slate-700 hover:bg-slate-50') : '',
+                respaldos, agregar,
                 g && x.estado === 'pendiente' ? btn('Aprobar', `Proyectos.revisarGasto('${x.id}','aprobado')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
                 g && x.estado === 'pendiente' ? btn('Rechazar', `Proyectos.pedirRechazo('${x.id}')`, 'border border-red-300 text-red-600 hover:bg-red-50') : '',
                 g && x.estado !== 'pendiente' ? btn('Reabrir', `Proyectos.revisarGasto('${x.id}','pendiente')`, 'border border-slate-300 text-slate-600 hover:bg-slate-50') : '',
@@ -666,19 +698,96 @@ const Proyectos = (() => {
         if (!pr) return;
         const monto = Math.round(numero($('pr-g-monto').value));
         if (!(monto > 0)) return toast('Indica un monto mayor que cero', 'error');
+        const archivos = [...$('pr-g-archivo').files];
+        if (archivos.length > MAX_ADJUNTOS) return toast(`Máximo ${MAX_ADJUNTOS} respaldos por gasto`, 'error');
         if (ocupado) return;
-        let path = null;
-        try { path = await subirArchivo($('pr-g-archivo').files[0], pr, 'gasto'); }
+        let paths;
+        try { paths = await subirVarios(archivos, pr); }
         catch (error) { return toast(error.message, 'error'); }
-        const data = await ejecutar(supa.from('proyecto_gastos').insert({
+        const base = {
             proyecto_id: pr.id, empresa_id: pr.empresa_id, fecha: $('pr-g-fecha').value, categoria: $('pr-g-cat').value,
             subcategoria: $('pr-g-sub').value.trim() || null, descripcion: $('pr-g-desc').value.trim(),
             proveedor: $('pr-g-prov').value.trim() || null, tipo_doc: $('pr-g-tipodoc').value,
-            numero_doc: $('pr-g-numdoc').value.trim() || null, monto, adjunto_path: path,
-        }).select().single(), 'Gasto registrado, pendiente de aprobación');
-        if (!data) { if (path) supa.storage.from('proyectos').remove([path]); return; }
+            numero_doc: $('pr-g-numdoc').value.trim() || null, monto, adjunto_path: paths[0] || null,
+        };
+        const data = await escribirGasto(conAdj => supa.from('proyecto_gastos').insert(conAdj ? { ...base, adjuntos: paths } : base).select().single(),
+            'Gasto registrado, pendiente de aprobación');
+        if (!data) { if (paths.length) supa.storage.from('proyectos').remove(paths); return; }
+        descartarSinColumna(paths, data);
         gastos.push(data);
         render();
+    }
+    // Agrega respaldos a un gasto ya registrado (por ejemplo, la segunda transferencia de un mismo pago).
+    async function agregarRespaldos(id, input) {
+        const x = gastos.find(g => g.id === id), pr = x && proyectos.find(p => p.id === x.proyecto_id);
+        const archivos = [...(input?.files || [])];
+        if (input) input.value = '';
+        if (!x || !pr || !archivos.length || ocupado) return;
+        const actuales = adjuntosDe(x);
+        if (actuales.length + archivos.length > MAX_ADJUNTOS) return toast(`Máximo ${MAX_ADJUNTOS} respaldos por gasto`, 'error');
+        if (!conAdjuntos && actuales.length) return toast(AVISO_MIGRACION, 'error');
+        let paths;
+        try { paths = await subirVarios(archivos, pr); }
+        catch (error) { return toast(error.message, 'error'); }
+        const nuevos = [...actuales, ...paths];
+        const data = await escribirGasto(conAdj => supa.from('proyecto_gastos')
+            .update(conAdj ? { adjuntos: nuevos, adjunto_path: nuevos[0] } : { adjunto_path: nuevos[0] }).eq('id', id).select().single(),
+            paths.length > 1 ? `${paths.length} respaldos agregados` : 'Respaldo agregado');
+        if (!data) { supa.storage.from('proyectos').remove(paths); return; }
+        descartarSinColumna(paths, data);
+        reemplazar(gastos, data);
+        render();
+    }
+    async function quitarRespaldo(id, indice) {
+        const x = gastos.find(g => g.id === id);
+        const actuales = x ? adjuntosDe(x) : [];
+        const path = actuales[indice];
+        if (!path || ocupado || !confirm(`¿Quitar el respaldo${actuales.length > 1 ? ' ' + (indice + 1) : ''} del gasto "${x.descripcion}"?`)) return;
+        const nuevos = actuales.filter((_, i) => i !== indice);
+        if (!conAdjuntos && nuevos.length) return toast(AVISO_MIGRACION, 'error');
+        const data = await escribirGasto(conAdj => supa.from('proyecto_gastos')
+            .update(conAdj ? { adjuntos: nuevos, adjunto_path: nuevos[0] || null } : { adjunto_path: null }).eq('id', id).select().single(), 'Respaldo quitado');
+        if (!data) return;
+        supa.storage.from('proyectos').remove([path]);
+        reemplazar(gastos, data);
+        render();
+    }
+    // Inserta o actualiza un gasto. Si la columna "adjuntos" aún no existe (migración 202610190001 pendiente),
+    // reintenta guardando solo adjunto_path, que es como funcionaba antes.
+    async function escribirGasto(consulta, exito) {
+        if (ocupado) return null;
+        ocupado = true;
+        try {
+            let { data, error } = await consulta(conAdjuntos);
+            if (error && conAdjuntos && faltaColumnaAdjuntos(error)) {
+                conAdjuntos = false;
+                ({ data, error } = await consulta(false));
+            }
+            if (error) throw error;
+            if (exito) toast(exito, 'success');
+            return data;
+        } catch (error) {
+            toast('No se pudo guardar: ' + (error.message || error), 'error');
+            return null;
+        } finally { ocupado = false; }
+    }
+    // Sin la columna solo queda guardado el primer respaldo: borra los demás archivos subidos y avisa.
+    function descartarSinColumna(paths, fila) {
+        if (conAdjuntos) return;
+        const sobrantes = paths.filter(p => p !== fila.adjunto_path);
+        if (!sobrantes.length) return;
+        supa.storage.from('proyectos').remove(sobrantes);
+        toast('Solo se guardó el primer respaldo. ' + AVISO_MIGRACION, 'error');
+    }
+    async function subirVarios(archivos, pr) {
+        const paths = [];
+        try {
+            for (const archivo of archivos) paths.push(await subirArchivo(archivo, pr, 'gasto'));
+        } catch (error) {
+            if (paths.length) supa.storage.from('proyectos').remove(paths);
+            throw error;
+        }
+        return paths;
     }
     async function revisarGasto(id, estado) {
         const cambios = { estado };
@@ -698,7 +807,8 @@ const Proyectos = (() => {
         if (!x || !confirm(`¿Eliminar el gasto "${x.descripcion}" por ${fmtCLP(x.monto)}?`)) return;
         const ok = await ejecutar(supa.from('proyecto_gastos').delete().eq('id', id), 'Gasto eliminado');
         if (!ok) return;
-        if (x.adjunto_path) supa.storage.from('proyectos').remove([x.adjunto_path]);
+        const archivos = adjuntosDe(x);
+        if (archivos.length) supa.storage.from('proyectos').remove(archivos);
         gastos = gastos.filter(g => g.id !== id);
         render();
     }
@@ -930,7 +1040,8 @@ const Proyectos = (() => {
             const ant = t.anticipoMonto || 0;
             const rAnt = filaResumen('Anticipo', 'anticipo', col => col === 'H' ? `${ant}` : `IF(H${rSub}=0,0,IF(K${rSub}>=H${rSub},${ant},ROUND(${ant}*K${rSub}/H${rSub},${dec})))`);
             const rRet = filaResumen(`Retención ${t.retPct}%`, 'retencion', col => `ROUND(${col}${rSub}*${(t.retPct || 0) / 100},${dec})`);
-            rNeto = filaResumen('Total Neto $', 'neto', col => `${col}${rSub}-${col}${rAnt}-${col}${rRet}`, { bold: true });
+            const rDesc = t.acum?.descuento ? filaResumen(`Descuento mandante${t.descuentoMotivo ? ` (${t.descuentoMotivo})` : ''}`, 'descuento') : null;
+            rNeto = filaResumen('Total Neto $', 'neto', col => `${col}${rSub}-${col}${rAnt}-${col}${rRet}${rDesc ? `-${col}${rDesc}` : ''}`, { bold: true });
             set(`A${rNeto}`, 'x Pagar Neto', { font: { bold: true } });
             formula(`B${rNeto}`, `H${rNeto}-K${rNeto}`, (t.contrato?.neto || 0) - (t.acum?.neto || 0));
         }
@@ -1007,16 +1118,21 @@ const Proyectos = (() => {
         const filas = items.map(i => {
             const cab = i.capId !== capActual ? `<tr class="cap"><td colspan="9">${h(i.capNumero)} ${h(i.capNombre)}</td></tr>` : '';
             capActual = i.capId;
-            return `${cab}<tr><td>${h(i.numero)} ${h(i.detalle)}</td><td class="c">${h(i.unidad)}</td><td class="r">${fmtNum(i.cant)}</td><td class="r">${M(i.pu)}</td><td class="r">${M(i.total)}</td><td class="r">${fmtNum(i.cantAcum)}</td><td class="r">${fmtPct(i.cant > 0 ? i.cantAcum / i.cant * 100 : 0)}</td><td class="r">${M(i.montoAcum)}</td><td class="r b">${M(i.montoPeriodo)}</td></tr>`;
+            return `${cab}<tr><td><div style="max-width:340px">${h(i.numero)} ${h(i.detalle)}</div></td><td class="c">${h(i.unidad)}</td><td class="r">${fmtNum(i.cant)}</td><td class="r">${M(i.pu)}</td><td class="r">${M(i.total)}</td><td class="r">${fmtNum(i.cantAcum)}</td><td class="r">${fmtPct(i.cant > 0 ? i.cantAcum / i.cant * 100 : 0)}</td><td class="r">${M(i.montoAcum)}</td><td class="r b">${M(i.montoPeriodo)}</td></tr>`;
         }).join('');
         const lin = (label, k, b = '') => `<tr class="${b}"><td>${label}</td>${['contrato', 'acum', 'ant', 'per'].map(c => `<td class="r">${M(t[c]?.[k])}</td>`).join('')}</tr>`;
         const conGG = (t.ggPct || 0) + (t.utilPct || 0) > 0;
         const resumenFilas = t.devolucion ? lin('Devolución de retenciones', 'neto', 'b') :
-            lin('Costo directo', 'cd') + (conGG ? lin(`Gastos generales ${t.ggPct}%`, 'gg') + lin(`Utilidad ${t.utilPct}%`, 'util') : '') + lin('Subtotal neto', 'sub', 'b') + lin('Descuento anticipo', 'anticipo') + lin(`Retención ${t.retPct}%`, 'retencion') + lin('Total neto', 'neto', 'b');
+            lin('Costo directo', 'cd') + (conGG ? lin(`Gastos generales ${t.ggPct}%`, 'gg') + lin(`Utilidad ${t.utilPct}%`, 'util') : '') + lin('Subtotal neto', 'sub', 'b') + lin('Descuento anticipo', 'anticipo') + lin(`Retención ${t.retPct}%`, 'retencion')
+            + (t.acum?.descuento ? lin(`Descuento mandante${t.descuentoMotivo ? ` (${h(t.descuentoMotivo)})` : ''}`, 'descuento') : '') + lin('Total neto', 'neto', 'b');
         const f = pr.config?.firmantes || {};
-        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px}.edp h1{font-size:16px;margin:0}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:56px;text-align:center}.edp .firmas div{border-top:1px solid #0f172a;width:30%;padding-top:4px}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
-        const html = `<div class="edp"><div class="top"><div>${emp.logo_b64 ? `<img src="${emp.logo_b64}" style="height:56px">` : ''}<h1>${h(emp.razon_social || emp.nombre_comercial)}</h1><div>${h(emp.rut ? 'RUT ' + emp.rut : '')}</div><div><b>Especialidad:</b> ${h(pr.config?.especialidad || pr.nombre)}</div></div>
-            <div style="text-align:right"><h1>${t.devolucion ? 'DEVOLUCIÓN DE RETENCIONES' : 'ESTADO DE PAGO'} Nº ${String(e.numero).padStart(2, '0')}${e.estado === 'borrador' ? ' (BORRADOR)' : ''}</h1><div><b>Obra:</b> ${h(pr.nombre)}</div><div><b>Mandante:</b> ${h(p.cliente.nombre)}</div><div><b>OC:</b> ${h(e.oc_numero || pr.config?.oc_numero || 'pendiente')} · <b>HES:</b> ${h(e.hes_numero || '—')}</div><div><b>Fecha presentación:</b> ${fecha(e.fecha_presentacion || hoyChile())}</div></div></div>
+        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:56px;text-align:center}.edp .firmas div{border-top:1px solid #0f172a;width:30%;padding-top:4px}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
+        const totalEdps = edpsDe(pr.id).length;
+        const html = `<div class="edp">
+            <div class="titulo"><h1>${t.devolucion ? 'DEVOLUCIÓN DE RETENCIONES' : 'ESTADO DE PAGO'} Nº ${String(e.numero).padStart(2, '0')}${e.estado === 'borrador' ? ' (BORRADOR)' : ''}</h1>
+                <span>Proyecto ${h(pr.codigo)} · ${h(pr.nombre)} · Correlativo Nº ${e.numero} de ${totalEdps} del proyecto · ${h(ESTADOS_EDP[e.estado] || e.estado)}</span></div>
+            <div class="top"><div>${emp.logo_b64 ? `<img src="${emp.logo_b64}" style="height:56px">` : ''}<h1>${h(emp.razon_social || emp.nombre_comercial)}</h1><div>${h(emp.rut ? 'RUT ' + emp.rut : '')}</div><div><b>Especialidad:</b> ${h(pr.config?.especialidad || pr.nombre)}</div></div>
+            <div style="text-align:right"><div><b>Centro de costo:</b> ${h(pr.codigo)}</div><div><b>Obra:</b> ${h(pr.nombre)}</div><div><b>Mandante:</b> ${h(p.cliente.nombre)}</div><div><b>OC:</b> ${h(e.oc_numero || pr.config?.oc_numero || 'pendiente')} · <b>HES:</b> ${h(e.hes_numero || '—')}</div><div><b>Fecha presentación:</b> ${fecha(e.fecha_presentacion || hoyChile())}</div></div></div>
             ${items.length ? `<table><thead><tr><th>Detalle</th><th>Un</th><th>Cant.</th><th>P. unitario</th><th>Precio total</th><th>Avance un</th><th>Avance %</th><th>EP actual</th><th>Total a pago</th></tr></thead><tbody>${filas}</tbody></table>` : ''}
             <table><thead><tr><th></th><th>Contrato</th><th>Acumulado</th><th>Anterior</th><th>Este EP</th></tr></thead><tbody>${resumenFilas}</tbody></table>
             <table style="width:45%;margin-left:auto"><tbody><tr><td>Neto este EP</td><td class="r">${M(t.per.neto)}</td></tr>${t.documento === 'exenta' ? '' : `<tr><td>${t.documento === 'boleta_honorarios' ? 'Retención boleta' : 'IVA'} ${t.tasa}%</td><td class="r">${M(t.impuesto)}</td></tr>`}<tr class="pagar b"><td>A PAGAR</td><td class="r">${M(t.aPagar)}</td></tr></tbody></table>
@@ -1041,8 +1157,8 @@ const Proyectos = (() => {
 
     return {
         cargar, render, abrir, volver, vista: cambiarVista, abrirDesdePresupuesto, existePara, resumenPresupuesto,
-        seleccionarEdp, editarAvance, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
-        guardarFacturacion, registrarPago, registrarGasto, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
+        seleccionarEdp, editarAvance, editarDescuento, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
+        guardarFacturacion, registrarPago, registrarGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
         // Para el módulo de órdenes de compra (compras.js)
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,

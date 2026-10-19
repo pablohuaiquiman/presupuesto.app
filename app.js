@@ -2263,10 +2263,15 @@ function generarPDF(css, bodyHtml, filename) {
 
     const limpiar = () => { wrapper.remove(); styleEl.remove(); };
 
+    // Si el contenido es más ancho que la hoja (tablas con muchas columnas), la hoja se
+    // ensancha para que nada quede cortado a la derecha.
+    const anchoPx = Math.max(816, Math.ceil(cont.scrollWidth), ...[...cont.children].map(el => Math.ceil(el.scrollWidth)));
+    cont.style.width = anchoPx + 'px';
+
     // Página única con alto dinámico según el contenido real: evita que la paginación
     // automática de html2pdf (basada en una imagen rasterizada) corte partidas, tablas
     // o el total a la mitad cuando el contenido queda justo en el borde de una página.
-    const anchoIn = 8.5;
+    const anchoIn = anchoPx / 96;
     const altoIn  = cont.scrollHeight / 96 + 0.05;
 
     html2pdf().set({

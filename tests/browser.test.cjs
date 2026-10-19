@@ -205,6 +205,13 @@ try {
  await pp.locator('input[data-item="b"][data-modo="pct"]').fill('25');
  await pp.locator('#pr-edp-resumen').getByText('$ 1.984.028').waitFor();
  assert.equal(await pp.locator('input[data-item="b"][data-modo="cant"]').inputValue(),'2');
+ // Descuento del mandante: se refleja en el resumen y se puede volver a cero
+ await pp.locator('#pr-edp-desc').fill('100.000');
+ await pp.locator('#pr-edp-desc-motivo').fill('Multa por atraso');
+ await pp.locator('#pr-edp-resumen').getByText('Multa por atraso').waitFor();
+ await pp.locator('#pr-edp-resumen').getByText('$ 1.865.028').waitFor();
+ await pp.locator('#pr-edp-desc').fill('');
+ await pp.locator('#pr-edp-resumen').getByText('$ 1.984.028').waitFor();
  await pp.locator('#pr-edp-oc').fill('OC-5521');
  await pp.getByRole('button',{name:'Presentar al mandante'}).click();
  await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0]?.estado==='presentado');
@@ -231,6 +238,18 @@ try {
  assert.equal(ws.getCell('M'+aPagar.row).value.result,1984028);
  assert.ok(celdas.some(c=>c.value?.formula?.startsWith('IF(AND(F')),'Faltan fórmulas de avance');
  assert.ok(celdas.some(c=>c.value==='F-1234'),'Falta la factura en el historial');
+ // PDF del EP: título con N° correlativo y hoja tan ancha como el contenido (nada cortado)
+ const pdf=await pp.evaluate(async()=>{
+  let opciones,ancho,texto,desborde;
+  window.html2pdf=()=>{const api={set(o){opciones=o;return api;},from(el){ancho=el.getBoundingClientRect().width;texto=el.innerText;desborde=[...el.querySelectorAll('*')].some(x=>x.getBoundingClientRect().right>el.getBoundingClientRect().right+1);return api;},save:async()=>{}};return api;};
+  Proyectos.exportarPDF(window.fixture.tables.proyecto_edps[0].id);
+  await new Promise(r=>setTimeout(r,50));
+  return {formato:opciones.jsPDF.format,ancho,texto,desborde};
+ });
+ assert.match(pdf.texto,/ESTADO DE PAGO Nº 01/);
+ assert.match(pdf.texto,/Correlativo Nº 1 de 1 del proyecto/);
+ assert.equal(pdf.desborde,false,'El PDF del EP tiene contenido cortado a la derecha');
+ assert.ok(Math.abs(pdf.formato[0]-pdf.ancho/96)<0.01);
  await pp.locator('#pr-pago-fecha').fill(new Date().toISOString().slice(0,10));
  await pp.getByRole('button',{name:'Marcar como pagado'}).click();
  await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0].estado==='pagado');
@@ -240,12 +259,23 @@ try {
  await pp.locator('#pr-g-sub').fill('Petróleo');
  await pp.locator('#pr-g-monto').fill('45.000');
  await pp.locator('#pr-g-desc').fill('Petróleo camioneta');
- await pp.locator('#pr-g-archivo').setInputFiles({name:'boleta.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 prueba')});
+ await pp.locator('#pr-g-archivo').setInputFiles([
+  {name:'boleta.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 prueba')},
+  {name:'transferencia1.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 t1')}]);
  await pp.getByRole('button',{name:'Registrar gasto'}).click();
  await pp.getByText('Petróleo camioneta').waitFor();
  const gasto=await pp.evaluate(()=>window.fixture.tables.proyecto_gastos[0]);
  assert.equal(gasto.monto,45000);
  assert.match(gasto.adjunto_path,/^aaaaaaaa-.*\/gasto\/.*\.pdf$/);
+ assert.equal(gasto.adjuntos.length,2);
+ assert.equal(gasto.adjuntos[0],gasto.adjunto_path);
+ // Agregar un respaldo después de registrado y quitar otro
+ await pp.locator('#pr-root input[type=file][onchange*="agregarRespaldos"]').setInputFiles({name:'transferencia2.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 t2')});
+ await pp.getByRole('button',{name:'Respaldo 3'}).waitFor();
+ assert.equal(await pp.evaluate(()=>window.fixture.tables.proyecto_gastos[0].adjuntos.length),3);
+ await pp.getByRole('button',{name:'×'}).first().click();
+ await pp.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].adjuntos.length===2);
+ assert.notEqual(await pp.evaluate(()=>window.fixture.tables.proyecto_gastos[0].adjunto_path),gasto.adjunto_path);
  await pp.getByRole('button',{name:'Aprobar',exact:true}).click();
  await pp.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].estado==='aprobado');
  await pp.getByRole('button',{name:'Resumen',exact:true}).click();

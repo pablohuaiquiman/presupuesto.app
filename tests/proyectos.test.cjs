@@ -47,6 +47,21 @@ assert.equal(a2.totales.acum.sub,7020000);
 assert.equal(a2.totales.acum.neto,7020000-1000001-351000);
 assert.equal(a2.totales.per.neto,a2.totales.acum.neto-a1.totales.acum.neto);
 
+// Descuento del mandante: baja el neto de su EP y el siguiente lo arrastra en "anterior".
+const d1=calcularEDP(yeso,cfg,null,avance({a:2,b:2}),{monto:100000,motivo:'Multa por atraso'});
+assert.equal(d1.totales.per.descuento,100000);
+assert.equal(d1.totales.per.neto,1667250-100000);
+assert.equal(d1.totales.descuentoMotivo,'Multa por atraso');
+assert.equal(d1.totales.contrato.descuento,0);
+const d2=ep(yeso,cfg,d1,{a:4,b:4});
+assert.equal(d2.totales.per.descuento,0);
+assert.equal(d2.totales.ant.descuento,100000);
+assert.equal(d2.totales.per.neto,1667250);
+assert.equal(d2.totales.descuentoMotivo,'');
+// Los EP guardados antes del descuento (sin la línea) siguen calculando igual.
+const viejo={totales:{acum:{...e1.totales.acum,descuento:undefined}},items:e1.items};
+assert.equal(ep(yeso,cfg,viejo,{a:4,b:4}).totales.per.neto,1667250);
+
 // Gastos generales y utilidad como en el presupuesto.
 const conGG={...yeso,usarGGUtil:true,ggPct:10,utilPct:5};
 const g=ep(conGG,{retencion_pct:0},null,{a:8,b:8});

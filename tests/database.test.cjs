@@ -146,6 +146,15 @@ await as(obrero);
 const g2=await value("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pid2+"','2026-10-03','materiales','Yeso',120000) returning id v");
 await db.exec("update public.proyecto_gastos set estado='aprobado' where id='"+g2+"'");
 await rejects("update public.proyectos set administrador_id='"+jefe+"' where id='"+pid2+"'",/Solo el administrador de la empresa/);
+// Varios respaldos por gasto: la migración copia el respaldo único existente.
+await db.exec("update public.proyecto_gastos set adjunto_path='"+d+"/"+pid2+"/gasto/a.jpg' where id='"+g2+"'");
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610190001_gastos_adjuntos.sql','utf8'));
+await as(obrero);
+assert.equal(await value("select array_to_string(adjuntos,',') v from public.proyecto_gastos where id='"+g2+"'"),d+"/"+pid2+"/gasto/a.jpg");
+await db.exec("update public.proyecto_gastos set adjuntos=adjuntos||'"+d+"/"+pid2+"/gasto/b.jpg'::text where id='"+g2+"'");
+assert.equal(await value("select cardinality(adjuntos) v from public.proyecto_gastos where id='"+g2+"'"),2);
+await rejects("update public.proyecto_gastos set adjuntos=array_fill('x'::text,array[11]) where id='"+g2+"'",/check/);
 // Archivos por carpeta de empresa.
 await as(jefe);
 await db.exec("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/a.jpg')");
