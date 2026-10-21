@@ -241,16 +241,27 @@ try {
  // PDF del EP: título con N° correlativo y hoja tan ancha como el contenido (nada cortado)
  const pdf=await pp.evaluate(async()=>{
   let opciones,ancho,texto,desborde;
-  window.html2pdf=()=>{const api={set(o){opciones=o;return api;},from(el){ancho=el.getBoundingClientRect().width;texto=el.innerText;desborde=[...el.querySelectorAll('*')].some(x=>x.getBoundingClientRect().right>el.getBoundingClientRect().right+1);return api;},save:async()=>{}};return api;};
+  const lienzo=document.createElement('canvas');lienzo.width=20;lienzo.height=20;
+  window.html2pdf=()=>{const api={set(o){opciones=o;return api;},from(el){ancho=el.getBoundingClientRect().width;texto=el.innerText;desborde=[...el.querySelectorAll('*')].some(x=>x.getBoundingClientRect().right>el.getBoundingClientRect().right+1);return api;},
+   toCanvas(){return api;},get:async()=>lienzo,toPdf(){return api;},output:async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'})};return api;};
   Proyectos.exportarPDF(window.fixture.tables.proyecto_edps[0].id);
-  await new Promise(r=>setTimeout(r,50));
-  return {formato:opciones.jsPDF.format,ancho,texto,desborde};
+  await new Promise(r=>setTimeout(r,100));
+  return {formato:opciones.jsPDF.format,orientacion:opciones.jsPDF.orientation,ancho,texto,desborde};
  });
  assert.match(pdf.texto,/ESTADO DE PAGO Nº 01/);
  assert.match(pdf.texto,/Correlativo Nº 1 de 1 del proyecto/);
  assert.equal(pdf.desborde,false,'El PDF del EP tiene contenido cortado a la derecha');
  assert.ok(Math.abs(pdf.formato[0]-pdf.ancho/96)<0.01);
- await pp.locator('#pr-pago-fecha').fill(new Date().toISOString().slice(0,10));
+ assert.equal(pdf.orientacion,pdf.formato[0]>pdf.formato[1]?'landscape':'portrait');
+ // Vista previa antes de descargar
+ await pp.locator('#modal-pdf').waitFor();
+ assert.match(await pp.locator('#pdf-vista-titulo').textContent(),/^EEPP N°01 .*\.pdf$/);
+ assert.match(await pp.locator('#pdf-vista-descargar').getAttribute('href'),/^blob:/);
+ assert.match(await pp.locator('#pdf-vista-descargar').getAttribute('download'),/\.pdf$/);
+ await pp.getByRole('button',{name:'Cerrar',exact:true}).click();
+ assert.equal(await pp.locator('#modal-pdf').isHidden(),true);
+ // El campo admite hasta "hoy" en Chile; la fecha UTC puede ser el día siguiente de noche.
+ await pp.locator('#pr-pago-fecha').fill(await pp.locator('#pr-pago-fecha').getAttribute('max'));
  await pp.getByRole('button',{name:'Marcar como pagado'}).click();
  await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0].estado==='pagado');
  assert.equal(await pp.locator('#badge-proyectos').isHidden(),true);
@@ -289,6 +300,69 @@ try {
  assert.equal(await pp.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Desbordamiento horizontal en móvil (proyectos)');
  assert.deepEqual(pp.errores,[]);
  await pp.close();
+
+ // ── Solicitud de anticipo como primer estado de pago ──
+ // (en esta misma página se revisa que cada botón PDF abra la vista previa y no descargue)
+ const pa=await abrirPagina([presupuesto,{...presupuesto,id:'pre-2',numero:'PRE-102',estado:'enviado',fechaAdjudicacion:undefined,ordenesTrabajo:[]}]);
+ let descargas=0; pa.on('download',()=>descargas++);
+ await pa.evaluate(()=>{const lienzo=document.createElement('canvas');lienzo.width=lienzo.height=10;
+  window.html2pdf=()=>{const api={set(){return api;},from(){return api;},toCanvas(){return api;},get:async()=>lienzo,toPdf(){return api;},output:async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'})};return api;};});
+ const verPDF=async(boton,nombre)=>{
+  await boton.click();
+  await pa.locator('#modal-pdf').waitFor();
+  assert.match(await pa.locator('#pdf-vista-titulo').textContent(),nombre);
+  await pa.locator('#modal-pdf').getByRole('button',{name:'Cerrar'}).click();
+  await pa.locator('#modal-pdf').waitFor({state:'hidden'});
+ };
+ await pa.locator('#pl-mode-empresa').click();
+ await pa.locator('[data-tab="tab-enviados"]').click();
+ await verPDF(pa.locator('#tab-enviados').getByRole('button',{name:'PDF',exact:true}).first(),/^PRE-102\.pdf$/);
+ await pa.locator('[data-tab="tab-adjudicados"]').click();
+ await verPDF(pa.locator('#tab-adjudicados').getByRole('button',{name:'PDF',exact:true}).first(),/^PRE-101\.pdf$/);
+ await pa.locator('[data-tab="tab-ot"]').click();
+ await verPDF(pa.locator('#ot-tbody').getByRole('button',{name:'PDF',exact:true}).first(),/^OT-101-01\.pdf$/);
+ // El botón "Descargar PDF" de la vista previa sí descarga
+ await pa.locator('#ot-tbody').getByRole('button',{name:'PDF',exact:true}).first().click();
+ await pa.locator('#modal-pdf').waitFor();
+ await Promise.all([pa.waitForEvent('download'),pa.locator('#pdf-vista-descargar').click()]);
+ assert.equal(descargas,1);
+ await pa.locator('#modal-pdf').getByRole('button',{name:'Cerrar'}).click();
+ await pa.locator('[data-tab="tab-adjudicados"]').click();
+ await pa.locator('[data-tab="tab-adjudicados"]').click();
+ await pa.getByRole('button',{name:'Pasar a ejecución (centro de costo)'}).click();
+ await pa.getByText('Gastos vs costo directo presupuestado').waitFor();
+ await pa.getByRole('button',{name:'Presupuesto y OT',exact:true}).click();
+ await verPDF(pa.locator('#pr-root').getByRole('button',{name:'PDF',exact:true}).first(),/^PRE-101\.pdf$/);
+ // Orden de compra del proyecto
+ await pa.evaluate(async()=>{const pr=window.fixture.tables.proyectos[0];
+  window.fixture.tables.ordenes_compra.push({id:'oc-1',proyecto_id:pr.id,empresa_id:pr.empresa_id,numero:1,estado:'emitida',fecha:'2026-10-01',categoria:'materiales',
+   proveedor:{nombre:'Ferretería'},items:[{detalle:'Yeso',unidad:'un',cantidad:2,precio:1000,total:2000}],totales:{neto:2000,iva:380,total:2380}});
+  await Compras.cargar();});
+ await pa.evaluate(()=>Compras.exportarPDF('oc-1'));
+ await pa.locator('#modal-pdf').waitFor();
+ assert.match(await pa.locator('#pdf-vista-titulo').textContent(),/\.pdf$/);
+ await pa.locator('#modal-pdf').getByRole('button',{name:'Cerrar'}).click();
+ await pa.getByRole('button',{name:'Estados de pago',exact:true}).click();
+ await pa.getByRole('button',{name:'Solicitud de anticipo'}).click();
+ await pa.locator('#pr-edp-ant-pct').fill('20');
+ await pa.locator('#pr-edp-ant-neto').getByText('$ 1.404.000').waitFor();
+ await pa.locator('#pr-edp-resumen').getByText('$ 1.670.760').waitFor();
+ await verPDF(pa.locator('#pr-root').getByRole('button',{name:'PDF',exact:true}).last(),/^EEPP N°01 .*\.pdf$/);
+ assert.equal(descargas,1,'Algún botón PDF descargó sin pasar por la vista previa');
+ await pa.getByRole('button',{name:'Presentar al mandante'}).click();
+ await pa.waitForFunction(()=>window.fixture.tables.proyecto_edps[0]?.estado==='presentado');
+ const sol=await pa.evaluate(()=>[window.fixture.tables.proyecto_edps[0].tipo,window.fixture.tables.proyecto_edps[0].totales.aPagar,window.fixture.tables.proyectos[0].config.anticipo_monto]);
+ assert.deepEqual(sol,['anticipo',1670760,1404000]);
+ assert.equal(await pa.getByRole('button',{name:'Solicitud de anticipo'}).count(),0);
+ await pa.getByRole('button',{name:'Aprobado por el mandante'}).click();
+ await pa.waitForFunction(()=>window.fixture.tables.proyecto_edps[0]?.estado==='aprobado');
+ // El EP de avance siguiente amortiza el anticipo
+ await pa.getByRole('button',{name:'+ Nuevo estado de pago'}).click();
+ await pa.locator('input[data-item="a"][data-modo="cant"]').fill('2');
+ await pa.locator('input[data-item="b"][data-modo="cant"]').fill('2');
+ await pa.locator('#pr-edp-resumen').getByText('$ 351.000').first().waitFor();
+ assert.deepEqual(pa.errores,[]);
+ await pa.close();
 
  // ── Pago de mensualidad con Mercado Pago ──
  const pm=await abrirPagina([],[{plan_nombre:'Mensual',monto_mensual:25000,inicio:'2026-10-01',dias_gracia:5,periodos_pagados:0,cancelada:false}]);

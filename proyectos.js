@@ -13,7 +13,7 @@ const Proyectos = (() => {
     const LINEAS = ['cd', 'gg', 'util', 'sub', 'anticipo', 'retencion', 'descuento', 'neto'];
 
     let disponible = false, proyectos = [], edps = [], gastos = [], perfiles = [];
-    let actualId = null, vista = 'resumen', edpSelId = null, cantidades = null, ajusteEdp = null;
+    let actualId = null, vista = 'resumen', edpSelId = null, cantidades = null, ajusteEdp = null, anticipoPctEdp = 0;
     let filtroCat = '', filtroEstado = '', rechazandoId = null, ocupado = false;
     // Varios respaldos por gasto (columna proyecto_gastos.adjuntos). Se apaga si la migración aún no está aplicada.
     const MAX_ADJUNTOS = 10;
@@ -98,6 +98,16 @@ const Proyectos = (() => {
         const cero = Object.fromEntries(LINEAS.map(k => [k, 0]));
         return { items: [], totales: cierreTributario({ contrato: cero, acum: cero, ant: cero, per: { ...cero, neto: retenido }, devolucion: true,
             pctAvance: 100, moneda: p.moneda || 'CLP', decimales: dec }, config, dec) };
+    }
+    // Solicitud de anticipo: % del subtotal neto del contrato (con GG y utilidad), sin retención.
+    // Su neto pasa a ser config.anticipo_monto, que los EP de avance amortizan según el avance.
+    function calcularSolicitudAnticipo(p, config, pct) {
+        const dec = decimales(p);
+        const porcentaje = Math.min(100, Math.max(0, +pct || 0));
+        const base = calcularEDP(p, config, null, null).totales.contrato.sub;
+        const cero = Object.fromEntries(LINEAS.map(k => [k, 0]));
+        return { items: [], totales: cierreTributario({ contrato: cero, acum: cero, ant: cero, per: { ...cero, neto: redondear(base * porcentaje / 100, dec) },
+            solicitudAnticipo: true, anticipoPct: porcentaje, baseAnticipo: base, pctAvance: 0, moneda: p.moneda || 'CLP', decimales: dec }, config, dec) };
     }
     function cierreTributario(t, config, dec) {
         const documento = DOCUMENTOS[config?.documento] ? config.documento : 'factura';
@@ -336,7 +346,7 @@ const Proyectos = (() => {
         return `<div class="space-y-4">
             ${tarjeta(`Presupuesto ${h(p.numero)}`, `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[640px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">N°</th><th class="px-3 py-2 text-left">Descripción</th><th class="px-3 py-2">Un</th><th class="px-3 py-2 text-right">Cant.</th><th class="px-3 py-2 text-right">P. unitario</th><th class="px-3 py-2 text-right">Total</th></tr></thead>${caps}</table></div>
                 <div class="mt-4 ml-auto max-w-sm text-sm">${linea('Costo directo', c.costoDirecto)}${p.usarGGUtil !== false ? linea(`Gastos generales (${p.ggPct || 0}%)`, c.gg) + linea(`Utilidad (${p.utilPct || 0}%)`, c.util) : ''}${linea('Subtotal neto', c.subtotal, 'font-bold border-t')}${linea(etiquetaIva(c.ivaPct, true), c.iva)}${linea('Total', c.total, 'font-black border-t')}</div>`,
-                btn('Descargar PDF', `exportarPDF('${p.id}')`, 'bg-red-600 hover:bg-red-700 text-white'))}
+                btn('PDF', `exportarPDF('${p.id}')`, 'bg-red-600 hover:bg-red-700 text-white'))}
             ${tarjeta('Órdenes de trabajo', ots.length ? `<div class="divide-y divide-slate-100">${ots.map(ot =>
                 `<div class="py-2 flex flex-wrap items-center justify-between gap-2"><div><span class="font-mono font-bold text-indigo-700">${h(ot.numero)}</span> <span class="text-xs text-slate-500">${fecha(ot.fecha)}</span> ${chip(ot.aprobacionCliente ? 'Aprobada con OC' : ot.estado === 'firmada' ? 'Firmada' : 'Pendiente firma', ot.aprobacionCliente ? 'bg-teal-100 text-teal-800' : ot.estado === 'firmada' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800')}</div>${btn('PDF', `exportarOTPDF('${p.id}','${ot.id}')`, 'bg-red-600 hover:bg-red-700 text-white')}</div>`).join('')}</div>` : '<p class="text-sm text-slate-400">Sin órdenes de trabajo. Genéralas desde Adjudicados.</p>')}
         </div>`;
@@ -348,11 +358,12 @@ const Proyectos = (() => {
         const activo = pr.estado === 'activo';
         const completo = r.avancePct >= 99.9999;
         const acciones = [
+            g && activo && !lista.length ? btn('Solicitud de anticipo', `Proyectos.nuevoEdp('anticipo')`, 'bg-amber-500 hover:bg-amber-600 text-white', 'title="Primer estado de pago: cobra un % del contrato como anticipo"') : '',
             g && activo && !r.abierto && !completo ? btn('+ Nuevo estado de pago', `Proyectos.nuevoEdp('avance')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
             g && activo && !r.abierto && completo && r.retenido > 0 && !r.devolucion ? btn('Solicitar devolución de retención', `Proyectos.nuevoEdp('devolucion_retencion')`, 'bg-purple-600 hover:bg-purple-700 text-white') : '',
         ].join(' ');
         const filas = [...lista].reverse().map(e => `<tr class="border-t border-slate-100 cursor-pointer ${e.id === edpSelId ? 'bg-blue-50' : 'hover:bg-slate-50'}" onclick="Proyectos.seleccionarEdp('${e.id}')">
-            <td class="px-3 py-2 font-mono font-bold">N° ${String(e.numero).padStart(2, '0')}${e.tipo === 'devolucion_retencion' ? '<span class="block text-xs font-sans font-normal text-purple-700">Devolución retención</span>' : ''}</td>
+            <td class="px-3 py-2 font-mono font-bold">N° ${String(e.numero).padStart(2, '0')}${e.tipo === 'devolucion_retencion' ? '<span class="block text-xs font-sans font-normal text-purple-700">Devolución retención</span>' : ''}${e.tipo === 'anticipo' ? `<span class="block text-xs font-sans font-normal text-amber-700">Anticipo ${fmtPct(e.totales?.anticipoPct)}</span>` : ''}</td>
             <td class="px-3 py-2">${fecha(e.fecha_presentacion)}</td>
             <td class="px-3 py-2 text-right">${e.tipo === 'avance' ? fmtPct(e.totales?.pctAvance) : '—'}</td>
             <td class="px-3 py-2 text-right">${fmtM(e.totales?.per?.neto, p)}</td>
@@ -375,6 +386,7 @@ const Proyectos = (() => {
             const ultimo = edpsDe(pr.id).filter(x => x.tipo === 'avance' && x.estado !== 'borrador').at(-1);
             return calcularDevolucion(p, pr.config, ultimo);
         }
+        if (e.tipo === 'anticipo') return calcularSolicitudAnticipo(p, pr.config, anticipoPctEdp);
         return calcularEDP(p, pr.config, previoDe(pr, e), cantidades, ajusteEdp);
     }
 
@@ -382,8 +394,10 @@ const Proyectos = (() => {
         const editable = e.estado === 'borrador' && gestiona(pr);
         const calc = calculoVigente(pr, p, e);
         const t = calc.totales;
-        const tabla = e.tipo === 'avance' ? itemsHtml(p, calc.items, editable) : '<p class="text-sm text-slate-600">Devolución de las retenciones acumuladas del contrato.</p>';
-        const titulo = `Estado de pago N° ${String(e.numero).padStart(2, '0')} ${chip(ESTADOS_EDP[e.estado], COLOR_EDP[e.estado])}`;
+        const tabla = e.tipo === 'avance' ? itemsHtml(p, calc.items, editable)
+            : e.tipo === 'anticipo' ? anticipoHtml(p, t, editable)
+            : '<p class="text-sm text-slate-600">Devolución de las retenciones acumuladas del contrato.</p>';
+        const titulo = `${e.tipo === 'anticipo' ? 'Solicitud de anticipo · ' : ''}Estado de pago N° ${String(e.numero).padStart(2, '0')} ${chip(ESTADOS_EDP[e.estado], COLOR_EDP[e.estado])}`;
         const exportar = `<div class="flex flex-wrap gap-2">${btn('Excel', `Proyectos.exportarExcel('${e.id}')`, 'bg-emerald-700 hover:bg-emerald-800 text-white')}${btn('PDF', `Proyectos.exportarPDF('${e.id}')`, 'bg-red-600 hover:bg-red-700 text-white')}</div>`;
         return tarjeta(titulo, `
             ${encabezadoEdpHtml(pr, e, editable)}
@@ -436,11 +450,29 @@ const Proyectos = (() => {
             <th class="px-3 py-2 text-right">EP actual</th><th class="px-3 py-2 text-right">EP anterior</th><th class="px-3 py-2 text-right">Total a pago</th></tr></thead><tbody>${filas}</tbody></table></div>`;
     }
 
+    function anticipoHtml(p, t, editable) {
+        return `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end bg-amber-50 border border-amber-200 rounded-xl p-4">
+            ${campo('Porcentaje de anticipo (%)', `<input id="pr-edp-ant-pct" inputmode="decimal" placeholder="Ej: 20" class="campo-input mt-1 font-bold" value="${h(editable ? (anticipoPctEdp || '') : (t.anticipoPct ?? ''))}" oninput="Proyectos.editarAnticipo()" ${editable ? '' : 'disabled'}>`)}
+            <div class="text-sm"><span class="campo-label">Subtotal neto del contrato</span><p class="mt-2 font-semibold">${fmtM(t.baseAnticipo, p)}</p></div>
+            <div class="text-sm"><span class="campo-label">Anticipo neto</span><p id="pr-edp-ant-neto" class="mt-2 font-black text-amber-700">${fmtM(t.per?.neto, p)}</p></div>
+            <p class="sm:col-span-3 text-xs text-slate-600">Este monto queda como anticipo del proyecto y se descuenta en los estados de pago de avance en proporción al avance; el que completa el 100 % descuenta el saldo.</p>
+        </div>`;
+    }
+    function editarAnticipo() {
+        const pr = actual(), p = pr && presupuestoDe(pr), e = edps.find(x => x.id === edpSelId);
+        if (!p || !e || e.tipo !== 'anticipo' || e.estado !== 'borrador') return;
+        anticipoPctEdp = Math.min(100, Math.max(0, numeroDecimal($('pr-edp-ant-pct')?.value)));
+        const t = calculoVigente(pr, p, e).totales;
+        $('pr-edp-ant-neto').textContent = fmtM(t.per.neto, p);
+        $('pr-edp-resumen').innerHTML = resumenEdpHtml(p, t);
+    }
+
     function resumenEdpHtml(p, t) {
         if (!t?.per) return '';
         const fila = (label, k, fuerte = false) => `<tr class="border-t border-slate-100 ${fuerte ? 'font-bold' : ''}"><td class="px-3 py-1.5">${label}</td>${['contrato', 'acum', 'ant', 'per'].map(c => `<td class="px-3 py-1.5 text-right">${fmtM(t[c]?.[k], p)}</td>`).join('')}</tr>`;
         const conGG = (t.ggPct || 0) + (t.utilPct || 0) > 0;
-        const cuerpo = t.devolucion ? fila('Devolución de retenciones', 'neto', true) : [
+        const cuerpo = t.devolucion ? fila('Devolución de retenciones', 'neto', true)
+            : t.solicitudAnticipo ? fila(`Anticipo solicitado (${fmtPct(t.anticipoPct)} de ${fmtM(t.baseAnticipo, p)})`, 'neto', true) : [
             fila('Costo directo', 'cd'),
             conGG ? fila(`Gastos generales (${fmtPct(t.ggPct)})`, 'gg') + fila(`Utilidad (${fmtPct(t.utilPct)})`, 'util') : '',
             fila('Subtotal neto', 'sub', true),
@@ -498,6 +530,7 @@ const Proyectos = (() => {
             ? new Map((e.items?.length ? e.items : calcularEDP(presupuestoDe(pr), pr.config, previoDe(pr, e), null).items).map(i => [i.itemId, i.cantAcum]))
             : null;
         ajusteEdp = { monto: e.totales?.per?.descuento || 0, motivo: e.totales?.descuentoMotivo || '' };
+        anticipoPctEdp = e.totales?.anticipoPct || 0;
         render();
         setTimeout(() => document.getElementById('pr-edp-resumen')?.closest('section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
     }
@@ -541,16 +574,27 @@ const Proyectos = (() => {
             if (exito) toast(exito, 'success');
             return data ?? true;
         } catch (error) {
-            toast('No se pudo guardar: ' + (error.message || error), 'error');
+            const sinMigracion = /proyecto_edps_tipo_check/.test(error.message || '');
+            toast(sinMigracion ? 'Para la solicitud de anticipo falta aplicar la migración 202610210001_edp_anticipo.sql' : 'No se pudo guardar: ' + (error.message || error), 'error');
             return null;
         } finally { ocupado = false; }
+    }
+    // El neto de la solicitud de anticipo es el anticipo que amortizan los EP de avance.
+    async function fijarAnticipo(pr, monto, fechaAnticipo) {
+        const config = { ...(pr.config || {}), anticipo_monto: monto, anticipo_fecha: fechaAnticipo || pr.config?.anticipo_fecha || null };
+        const { data, error } = await supa.from('proyectos').update({ config }).eq('id', pr.id).select().single();
+        if (error) return toast('No se pudo actualizar el anticipo del proyecto: ' + error.message, 'error');
+        reemplazar(proyectos, data);
     }
 
     async function nuevoEdp(tipo) {
         const pr = actual(), p = pr && presupuestoDe(pr);
         if (!p || !gestiona(pr)) return;
+        if (tipo === 'anticipo' && edpsDe(pr.id).length) return toast('La solicitud de anticipo debe ser el primer estado de pago del proyecto', 'error');
         const ultimo = edpsDe(pr.id).filter(x => x.tipo === 'avance' && x.estado !== 'borrador').at(-1) || null;
-        const calc = tipo === 'devolucion_retencion' ? calcularDevolucion(p, pr.config, ultimo) : calcularEDP(p, pr.config, ultimo, null);
+        const calc = tipo === 'devolucion_retencion' ? calcularDevolucion(p, pr.config, ultimo)
+            : tipo === 'anticipo' ? calcularSolicitudAnticipo(p, pr.config, 0)
+            : calcularEDP(p, pr.config, ultimo, null);
         const data = await ejecutar(supa.from('proyecto_edps').insert({ proyecto_id: pr.id, tipo, items: calc.items, totales: calc.totales, oc_numero: pr.config?.oc_numero || null }).select().single(),
             'Estado de pago creado en borrador');
         if (!data) return;
@@ -562,6 +606,7 @@ const Proyectos = (() => {
         if (!p || !e) return;
         const calc = calculoVigente(pr, p, e);
         if (nuevoEstado === 'presentado') {
+            if (e.tipo === 'anticipo' && !(calc.totales.per?.neto > 0)) return toast('Indica el porcentaje de anticipo', 'error');
             if (!(calc.totales.per?.neto > 0) && !(calc.totales.per?.sub > 0)) return toast('El estado de pago no tiene avance en este período', 'error');
             if (!confirm(`¿Presentar el estado de pago N° ${e.numero} por ${fmtM(calc.totales.aPagar, p)}? Mientras el mandante no lo apruebe podrás devolverlo a borrador para corregir montos o descuentos.`)) return;
         }
@@ -573,6 +618,7 @@ const Proyectos = (() => {
         const data = await ejecutar(supa.from('proyecto_edps').update(cambios).eq('id', id).select().single(), nuevoEstado ? 'Estado de pago presentado' : 'Borrador guardado');
         if (!data) return;
         reemplazar(edps, data);
+        if (e.tipo === 'anticipo') await fijarAnticipo(pr, calc.totales.per.neto, cambios.fecha_presentacion);
         if (nuevoEstado) cantidades = null;
         render();
     }
@@ -597,8 +643,10 @@ const Proyectos = (() => {
     }
     async function eliminarEdp(id) {
         if (!confirm('¿Eliminar este borrador?')) return;
+        const e = edps.find(x => x.id === id), pr = actual();
         const ok = await ejecutar(supa.from('proyecto_edps').delete().eq('id', id), 'Borrador eliminado');
         if (!ok) return;
+        if (e?.tipo === 'anticipo' && pr) await fijarAnticipo(pr, 0, null);
         edps = edps.filter(x => x.id !== id);
         edpSelId = null; cantidades = null;
         render();
@@ -851,6 +899,8 @@ const Proyectos = (() => {
         const dis = g ? '' : 'disabled';
         const lista = edpsDe(pr.id), vacio = !lista.length && !gastosDe(pr.id).length
             && !(typeof Compras !== 'undefined' && Compras.deProyecto(pr.id).length);
+        const solicitud = lista.find(e => e.tipo === 'anticipo');
+        const disAnt = solicitud ? 'disabled' : dis; // lo define la solicitud de anticipo
         return tarjeta('Configuración del proyecto', `<form onsubmit="Proyectos.guardarConfig(event)" class="space-y-5">
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 ${campo('Nombre / obra', `<input id="pr-c-nombre" required maxlength="160" class="campo-input mt-1" value="${h(pr.nombre)}" ${dis}>`)}
@@ -861,14 +911,14 @@ const Proyectos = (() => {
                 ${campo('Estado del proyecto', `<select id="pr-c-estado" class="campo-input mt-1" ${dis}><option value="activo" ${pr.estado === 'activo' ? 'selected' : ''}>En ejecución</option><option value="cerrado" ${pr.estado === 'cerrado' ? 'selected' : ''}>Cerrado</option></select>`)}
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                ${campo(`Anticipo neto (${p.moneda === 'UF' ? 'UF' : '$'})`, `<input id="pr-c-anticipo" inputmode="decimal" class="campo-input mt-1" value="${h(c.anticipo_monto || 0)}" ${dis}>`)}
-                ${campo('Fecha del anticipo', `<input id="pr-c-anticipo-fecha" type="date" class="campo-input mt-1" value="${h(c.anticipo_fecha || '')}" ${dis}>`)}
+                ${campo(`Anticipo neto (${p.moneda === 'UF' ? 'UF' : '$'})`, `<input id="pr-c-anticipo" inputmode="decimal" class="campo-input mt-1" value="${h(c.anticipo_monto || 0)}" ${disAnt}>`)}
+                ${campo('Fecha del anticipo', `<input id="pr-c-anticipo-fecha" type="date" class="campo-input mt-1" value="${h(c.anticipo_fecha || '')}" ${disAnt}>`)}
                 ${campo('Retención (%)', `<input id="pr-c-retencion" inputmode="decimal" class="campo-input mt-1" value="${h(c.retencion_pct ?? 5)}" ${dis}>`)}
                 ${campo('Documento tributario', `<select id="pr-c-documento" onchange="document.getElementById('pr-c-tasa').value={factura:19,boleta_honorarios:15.25,exenta:0}[this.value]" class="campo-input mt-1" ${dis}>${Object.entries(DOCUMENTOS).map(([k, t]) => `<option value="${k}" ${k === (c.documento || 'factura') ? 'selected' : ''}>${h(t)}</option>`).join('')}</select>`)}
                 ${campo('Tasa del documento (%)', `<input id="pr-c-tasa" inputmode="decimal" class="campo-input mt-1" value="${h(c.tasa ?? TASA_DEFECTO[c.documento || 'factura'])}" ${dis}>`)}
                 ${p.moneda === 'UF' ? campo('Valor UF de referencia ($)', `<input id="pr-c-uf" inputmode="decimal" class="campo-input mt-1" value="${h(c.valor_uf_ref || '')}" ${dis}>`) : ''}
             </div>
-            <p class="text-xs text-slate-500">El anticipo se descuenta en cada estado de pago en proporción al avance; el que completa el 100 % descuenta el saldo exacto. Los cambios se aplican a los estados de pago que aún no se presentan.</p>
+            <p class="text-xs text-slate-500">El anticipo se descuenta en cada estado de pago en proporción al avance; el que completa el 100 % descuenta el saldo exacto. Los cambios se aplican a los estados de pago que aún no se presentan.${solicitud ? ` El monto lo define la solicitud de anticipo (EP N° ${String(solicitud.numero).padStart(2, '0')}, ${fmtPct(solicitud.totales?.anticipoPct)}).` : ''}</p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 ${campo('VºBº Cliente (nombre)', `<input id="pr-c-f-cliente" maxlength="120" class="campo-input mt-1" value="${h(f.cliente || '')}" ${dis}>`)}
                 ${campo('VºBº Gerencia de proyecto', `<input id="pr-c-f-gerencia" maxlength="120" class="campo-input mt-1" value="${h(f.gerencia_proyecto || '')}" ${dis}>`)}
@@ -886,7 +936,8 @@ const Proyectos = (() => {
         if (tasa < 0 || tasa > 40) return toast('Revisa la tasa del documento', 'error');
         const config = { ...pr.config,
             especialidad: $('pr-c-especialidad').value.trim(), oc_numero: $('pr-c-oc').value.trim(),
-            anticipo_monto: Math.max(0, numeroDecimal($('pr-c-anticipo').value)), anticipo_fecha: $('pr-c-anticipo-fecha').value || null,
+            ...(edpsDe(pr.id).some(e => e.tipo === 'anticipo') ? {} : {
+                anticipo_monto: Math.max(0, numeroDecimal($('pr-c-anticipo').value)), anticipo_fecha: $('pr-c-anticipo-fecha').value || null }),
             retencion_pct: retencion, documento: $('pr-c-documento').value, tasa,
             firmantes: { cliente: $('pr-c-f-cliente').value.trim(), gerencia_proyecto: $('pr-c-f-gerencia').value.trim(), gerente_general: $('pr-c-f-general').value.trim() },
         };
@@ -941,6 +992,8 @@ const Proyectos = (() => {
         toast('Generando Excel…', 'info');
         const { e, pr, p, items, t, historial, emp } = d;
         const dec = t.decimales ?? decimales(p);
+        // Retención del historial: el avance retiene, la devolución la devuelve y el anticipo no retiene.
+        const retencionHist = x => x.tipo === 'avance' ? (x.totales?.per?.retencion || 0) : x.tipo === 'devolucion_retencion' ? -(x.totales?.per?.neto || 0) : 0;
         const nf = dec > 0 ? `#,##0.${'0'.repeat(dec)}` : '#,##0';
         const wb = new ExcelJS.Workbook();
         wb.creator = emp.nombre_comercial || 'Presupuestos Pro';
@@ -961,7 +1014,7 @@ const Proyectos = (() => {
         }
         set('C2', emp.razon_social || emp.nombre_comercial || '', { font: { bold: true, size: 14 } });
         set('C3', [emp.rut ? `RUT ${emp.rut}` : '', 'Empresa Constructora'].filter(Boolean).join(' · '), { font: { size: 10 } });
-        ws.mergeCells('K2:L2'); set('K2', t.devolucion ? 'DEVOLUCIÓN RETENCIONES · EP Nº' : 'ESTADO DE PAGO Nº', { font: { bold: true, size: 12 }, alignment: { horizontal: 'right' } });
+        ws.mergeCells('K2:L2'); set('K2', t.devolucion ? 'DEVOLUCIÓN RETENCIONES · EP Nº' : t.solicitudAnticipo ? 'SOLICITUD DE ANTICIPO · EP Nº' : 'ESTADO DE PAGO Nº',{ font: { bold: true, size: 12 }, alignment: { horizontal: 'right' } });
         set('M2', String(e.numero).padStart(2, '0'), { font: { bold: true, size: 14 }, alignment: { horizontal: 'center' }, border: borde });
         if (e.estado === 'borrador') set('M3', 'BORRADOR', { font: { bold: true, color: { argb: 'FFDC2626' } }, alignment: { horizontal: 'center' } });
         const cab = [['K4', 'Obra :', pr.nombre], ['K5', 'Ubicación :', [p.cliente.direccion, p.cliente.comuna, p.cliente.region].filter(Boolean).join(', ')], ['K6', 'Mandante :', p.cliente.nombre], ['K7', 'OC :', e.oc_numero || pr.config?.oc_numero || 'pendiente']];
@@ -978,7 +1031,7 @@ const Proyectos = (() => {
         encabezados.forEach(([col, texto]) => set(`${col}${fila}`, texto, { font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: oscuro, border: borde, alignment: { horizontal: 'center', vertical: 'middle', wrapText: true } }));
         ws.getRow(fila).height = 30;
         fila += 1;
-        set(`A${fila}`, t.devolucion ? 'DEVOLUCIÓN' : 'CONTRATO', { font: { bold: true } });
+        set(`A${fila}`, t.devolucion ? 'DEVOLUCIÓN' : t.solicitudAnticipo ? 'ANTICIPO' : 'CONTRATO', { font: { bold: true } });
         fila += 1;
         const primera = fila;
         let capActual = null;
@@ -1023,6 +1076,15 @@ const Proyectos = (() => {
             ws.mergeCells(`E${fila}:L${fila}`);
             set(`E${fila}`, 'Devolución de retenciones acumuladas', { font: { bold: true }, alignment: { horizontal: 'right' }, border: borde });
             dinero(`M${fila}`, t.per.neto).font = { bold: true };
+            rNeto = fila++;
+        } else if (t.solicitudAnticipo) {
+            ws.mergeCells(`E${fila}:L${fila}`);
+            set(`E${fila}`, 'Subtotal neto del contrato', { alignment: { horizontal: 'right' }, border: borde });
+            dinero(`M${fila}`, t.baseAnticipo || 0); const rBase = fila++;
+            ws.mergeCells(`E${fila}:K${fila}`);
+            set(`E${fila}`, 'Porcentaje de anticipo', { alignment: { horizontal: 'right' }, border: borde });
+            set(`L${fila}`, (t.anticipoPct || 0) / 100, { numFmt: '0.00%', border: borde, alignment: { horizontal: 'center' } }); const rPct = fila;
+            formula(`M${fila}`, `ROUND(M${rBase}*L${rPct},${dec})`, t.per.neto).font = { bold: true };
             rNeto = fila++;
         } else {
             const rCD = filaResumen('Costo directo', 'cd', col => `SUM(${col}${primera}:${col}${ultima})`);
@@ -1081,7 +1143,7 @@ const Proyectos = (() => {
                 set(`G${r}`, aFecha(x.fecha_presentacion), { border: borde, numFmt: 'dd-mm-yyyy', alignment: { horizontal: 'center' } });
                 dinero(`H${r}`, x.totales?.per?.neto || 0);
                 set(`I${r}`, x.hes_numero || '', { border: borde });
-                dinero(`J${r}`, x.tipo === 'avance' ? (x.totales?.per?.retencion || 0) : -(x.totales?.per?.neto || 0));
+                dinero(`J${r}`, retencionHist(x));
                 set(`K${r}`, x.factura_numero || '', { border: borde });
                 set(`L${r}`, x.oc_numero || '', { border: borde });
                 set(`M${r}`, ESTADOS_EDP[x.estado], { border: borde });
@@ -1091,12 +1153,12 @@ const Proyectos = (() => {
         const rTot = finHist + 1;
         set(`G${rTot}`, 'Totales', { font: { bold: true }, alignment: { horizontal: 'right' } });
         const sumaNeto = historial.reduce((s, x) => s + (x.totales?.per?.neto || 0), 0);
-        const sumaRet = historial.reduce((s, x) => s + (x.tipo === 'avance' ? (x.totales?.per?.retencion || 0) : -(x.totales?.per?.neto || 0)), 0);
+        const sumaRet = historial.reduce((s, x) => s + retencionHist(x), 0);
         formula(`H${rTot}`, `SUM(H${inicioHist}:H${finHist})`, sumaNeto).font = { bold: true };
         formula(`J${rTot}`, `SUM(J${inicioHist}:J${finHist})`, sumaRet).font = { bold: true };
         ws.mergeCells(`F${rTot + 2}:K${rTot + 2}`); set(`F${rTot + 2}`, 'Total contrato neto menos estados de pago (por pagar)', { alignment: { horizontal: 'right' }, font: { bold: true } });
         ws.mergeCells(`L${rTot + 2}:M${rTot + 2}`);
-        const contratoNeto = (t.contrato?.neto || 0);
+        const contratoNeto = t.solicitudAnticipo ? calcularEDP(p, pr.config, null, null).totales.contrato.neto : (t.contrato?.neto || 0);
         dinero(`L${rTot + 2}`, t.devolucion ? 0 : Math.max(0, contratoNeto - historial.filter(x => x.tipo === 'avance').reduce((s, x) => s + (x.totales?.per?.neto || 0), 0))).font = { bold: true };
         ws.pageSetup.printArea = `A1:M${rTot + 2}`;
 
@@ -1122,14 +1184,15 @@ const Proyectos = (() => {
         }).join('');
         const lin = (label, k, b = '') => `<tr class="${b}"><td>${label}</td>${['contrato', 'acum', 'ant', 'per'].map(c => `<td class="r">${M(t[c]?.[k])}</td>`).join('')}</tr>`;
         const conGG = (t.ggPct || 0) + (t.utilPct || 0) > 0;
-        const resumenFilas = t.devolucion ? lin('Devolución de retenciones', 'neto', 'b') :
+        const resumenFilas = t.devolucion ? lin('Devolución de retenciones', 'neto', 'b')
+            : t.solicitudAnticipo ? `<tr><td>Subtotal neto del contrato</td><td class="r" colspan="4">${M(t.baseAnticipo)}</td></tr><tr><td>Porcentaje de anticipo</td><td class="r" colspan="4">${fmtPct(t.anticipoPct)}</td></tr><tr class="b"><td>Anticipo neto</td><td class="r" colspan="4">${M(t.per.neto)}</td></tr>` :
             lin('Costo directo', 'cd') + (conGG ? lin(`Gastos generales ${t.ggPct}%`, 'gg') + lin(`Utilidad ${t.utilPct}%`, 'util') : '') + lin('Subtotal neto', 'sub', 'b') + lin('Descuento anticipo', 'anticipo') + lin(`Retención ${t.retPct}%`, 'retencion')
             + (t.acum?.descuento ? lin(`Descuento mandante${t.descuentoMotivo ? ` (${h(t.descuentoMotivo)})` : ''}`, 'descuento') : '') + lin('Total neto', 'neto', 'b');
         const f = pr.config?.firmantes || {};
         const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:56px;text-align:center}.edp .firmas div{border-top:1px solid #0f172a;width:30%;padding-top:4px}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
         const totalEdps = edpsDe(pr.id).length;
         const html = `<div class="edp">
-            <div class="titulo"><h1>${t.devolucion ? 'DEVOLUCIÓN DE RETENCIONES' : 'ESTADO DE PAGO'} Nº ${String(e.numero).padStart(2, '0')}${e.estado === 'borrador' ? ' (BORRADOR)' : ''}</h1>
+            <div class="titulo"><h1>${t.devolucion ? 'DEVOLUCIÓN DE RETENCIONES' : t.solicitudAnticipo ? 'SOLICITUD DE ANTICIPO · ESTADO DE PAGO' : 'ESTADO DE PAGO'} Nº ${String(e.numero).padStart(2, '0')}${e.estado === 'borrador' ? ' (BORRADOR)' : ''}</h1>
                 <span>Proyecto ${h(pr.codigo)} · ${h(pr.nombre)} · Correlativo Nº ${e.numero} de ${totalEdps} del proyecto · ${h(ESTADOS_EDP[e.estado] || e.estado)}</span></div>
             <div class="top"><div>${emp.logo_b64 ? `<img src="${emp.logo_b64}" style="height:56px">` : ''}<h1>${h(emp.razon_social || emp.nombre_comercial)}</h1><div>${h(emp.rut ? 'RUT ' + emp.rut : '')}</div><div><b>Especialidad:</b> ${h(pr.config?.especialidad || pr.nombre)}</div></div>
             <div style="text-align:right"><div><b>Centro de costo:</b> ${h(pr.codigo)}</div><div><b>Obra:</b> ${h(pr.nombre)}</div><div><b>Mandante:</b> ${h(p.cliente.nombre)}</div><div><b>OC:</b> ${h(e.oc_numero || pr.config?.oc_numero || 'pendiente')} · <b>HES:</b> ${h(e.hes_numero || '—')}</div><div><b>Fecha presentación:</b> ${fecha(e.fecha_presentacion || hoyChile())}</div></div></div>
@@ -1157,7 +1220,7 @@ const Proyectos = (() => {
 
     return {
         cargar, render, abrir, volver, vista: cambiarVista, abrirDesdePresupuesto, existePara, resumenPresupuesto,
-        seleccionarEdp, editarAvance, editarDescuento, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
+        seleccionarEdp, editarAvance, editarDescuento, editarAnticipo, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
         guardarFacturacion, registrarPago, registrarGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
         // Para el módulo de órdenes de compra (compras.js)
@@ -1166,6 +1229,6 @@ const Proyectos = (() => {
         get lista() { return proyectos; },
         get perfiles() { return perfiles; },
         get disponible() { return disponible; },
-        test: { calcularEDP, calcularDevolucion, diasEntre, redondear },
+        test: { calcularEDP, calcularDevolucion, calcularSolicitudAnticipo, diasEntre, redondear },
     };
 })();

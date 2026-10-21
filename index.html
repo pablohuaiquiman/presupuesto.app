@@ -992,6 +992,23 @@
     </div>
 </div>
 
+<!-- ═══ MODAL · VISTA PREVIA DE PDF ═══ -->
+<div id="modal-pdf" role="dialog" aria-labelledby="pdf-vista-titulo" style="display:none" class="modal-overlay fixed inset-0 bg-black/70 z-50 items-center justify-center p-2 sm:p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-full max-h-[96vh] flex flex-col overflow-hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b">
+            <h3 id="pdf-vista-titulo" class="text-sm sm:text-base font-bold text-slate-800 truncate min-w-0 flex-1"></h3>
+            <div class="flex gap-2">
+                <a id="pdf-vista-descargar" href="#" class="bg-red-600 hover:bg-red-700 text-white text-sm font-bold py-2 px-4 rounded-xl transition-colors">⬇ Descargar PDF</a>
+                <a id="pdf-vista-abrir" href="#" target="_blank" rel="noopener" class="hidden sm:inline-block border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm font-semibold py-2 px-4 rounded-xl transition-colors">Abrir en pestaña</a>
+                <button onclick="cerrarVistaPDF()" class="border border-slate-300 text-slate-600 hover:bg-slate-100 text-sm font-semibold py-2 px-4 rounded-xl transition-colors">Cerrar</button>
+            </div>
+        </div>
+        <div id="pdf-vista-cuerpo" class="flex-1 overflow-auto bg-slate-200 p-2 sm:p-4">
+            <img id="pdf-vista-img" alt="Vista previa del PDF" class="block mx-auto w-full max-w-4xl bg-white shadow-lg">
+        </div>
+    </div>
+</div>
+
 <!-- ═══ TOAST ═══ -->
 <div id="toast" class="fixed bottom-6 right-6 z-[60] translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
     <div class="flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl min-w-60 max-w-sm" id="toast-inner">
@@ -1061,9 +1078,9 @@
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261007a"></script>
-<script src="app.js?v=20261019c"></script>
+<script src="app.js?v=20261019d"></script>
 <script src="platform.js?v=20261019a"></script>
-<script src="proyectos.js?v=20261019c"></script>
+<script src="proyectos.js?v=20261021b"></script>
 <script src="compras.js?v=20261007b"></script>
 </body>
 </html>

@@ -2204,6 +2204,7 @@ function cerrarModal(id) {
     document.body.style.overflow='';
 }
 document.addEventListener('click', e=>{
+    if (e.target === document.getElementById('modal-pdf')) return cerrarVistaPDF();
     ['modal-contrato','modal-catalogo','modal-ot','modal-link-firma','modal-aprobacion-oc'].forEach(id=>{
         const el=document.getElementById(id);
         if(el && e.target===el) {
@@ -2235,8 +2236,29 @@ function toast(msg, tipo='success') {
 }
 
 // ════════════════════════════════════════════════════════
-// GENERAR Y DESCARGAR PDF (html2pdf.js — descarga directa, sin diálogos)
+// GENERAR PDF (html2pdf.js) — se muestra una vista previa y desde ahí se descarga
 // ════════════════════════════════════════════════════════
+let pdfVistaUrl = null;
+function mostrarVistaPDF(blob, imagen, filename) {
+    cerrarVistaPDF();
+    pdfVistaUrl = URL.createObjectURL(blob);
+    document.getElementById('pdf-vista-titulo').textContent = filename;
+    document.getElementById('pdf-vista-img').src = imagen;
+    const descargar = document.getElementById('pdf-vista-descargar');
+    descargar.href = pdfVistaUrl;
+    descargar.download = filename;
+    document.getElementById('pdf-vista-abrir').href = pdfVistaUrl;
+    abrirModal('modal-pdf');
+    document.getElementById('pdf-vista-cuerpo').scrollTop = 0;
+}
+function cerrarVistaPDF() {
+    if (document.getElementById('modal-pdf')?.style.display === 'flex') cerrarModal('modal-pdf');
+    document.getElementById('pdf-vista-img')?.removeAttribute('src');
+    // Se libera después: si se acaba de pulsar "Abrir en pestaña", la pestaña nueva aún lo necesita.
+    if (pdfVistaUrl) { const url = pdfVistaUrl; setTimeout(() => URL.revokeObjectURL(url), 60000); }
+    pdfVistaUrl = null;
+}
+
 function generarPDF(css, bodyHtml, filename) {
     if (typeof html2pdf === 'undefined') {
         return toast('No se pudo cargar el generador de PDF (revisa tu conexión a internet)', 'error');
@@ -2274,22 +2296,27 @@ function generarPDF(css, bodyHtml, filename) {
     const anchoIn = anchoPx / 96;
     const altoIn  = cont.scrollHeight / 96 + 0.05;
 
-    html2pdf().set({
+    const worker = html2pdf().set({
         margin: 0,
         filename,
         image: { type: 'jpeg', quality: 1 },
         // Sin scrollX/Y en 0, html2canvas desplaza la captura según el scroll de la página
         // y el PDF sale con una franja en blanco arriba y el final cortado.
         html2canvas: { scale: 2.5, useCORS: true, scrollX: 0, scrollY: 0 },
-        jsPDF: { unit: 'in', format: [anchoIn, altoIn], orientation: 'portrait' },
+        // jsPDF intercambia ancho y alto si no coinciden con la orientación: con una hoja
+        // ensanchada y contenido corto, "portrait" la dejaría angosta y cortaría el documento.
+        jsPDF: { unit: 'in', format: [anchoIn, altoIn], orientation: anchoIn > altoIn ? 'landscape' : 'portrait' },
         pagebreak: { mode: ['avoid-all'] },
-    }).from(cont).save().then(() => {
-        limpiar();
-        toast('PDF descargado', 'success');
-    }).catch(err => {
-        limpiar();
-        toast('Error al generar el PDF: ' + err.message, 'error');
-    });
+    }).from(cont).toCanvas();
+    // El PDF es una sola página con la imagen del documento: la vista previa muestra esa misma
+    // imagen, que se ve igual en celulares (donde los navegadores no muestran PDF incrustados).
+    (async () => {
+        const canvas = await worker.get('canvas');
+        const blob = await worker.toPdf().output('blob');
+        mostrarVistaPDF(blob, canvas.toDataURL('image/jpeg', 0.85), filename);
+    })().catch(err => {
+        toast('Error al generar el PDF: ' + (err?.message || err), 'error');
+    }).finally(limpiar);
 }
 
 // ════════════════════════════════════════════════════════

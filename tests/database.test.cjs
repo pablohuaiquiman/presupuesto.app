@@ -155,6 +155,21 @@ assert.equal(await value("select array_to_string(adjuntos,',') v from public.pro
 await db.exec("update public.proyecto_gastos set adjuntos=adjuntos||'"+d+"/"+pid2+"/gasto/b.jpg'::text where id='"+g2+"'");
 assert.equal(await value("select cardinality(adjuntos) v from public.proyecto_gastos where id='"+g2+"'"),2);
 await rejects("update public.proyecto_gastos set adjuntos=array_fill('x'::text,array[11]) where id='"+g2+"'",/check/);
+// Solicitud de anticipo: solo como primer estado de pago del proyecto.
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610210001_edp_anticipo.sql','utf8'));
+await db.exec("insert into public.presupuestos(id,empresa_id,data) values('pd2','"+d+"','{}')");
+await as(jefe);
+const prAnt=await value("insert into public.proyectos(empresa_id,presupuesto_id,codigo,nombre) values('"+d+"','pd2','CC-2','Obra 2') returning id v");
+const epAnt=await value("insert into public.proyecto_edps(proyecto_id,tipo) values('"+prAnt+"','anticipo') returning id v");
+assert.equal(await value("select numero::text||tipo v from public.proyecto_edps where id='"+epAnt+"'"),'1anticipo');
+await db.exec("update public.proyecto_edps set estado='presentado' where id='"+epAnt+"'");
+await db.exec("update public.proyecto_edps set estado='aprobado' where id='"+epAnt+"'");
+await rejects("insert into public.proyecto_edps(proyecto_id,tipo) values('"+prAnt+"','anticipo')",/primer estado de pago/);
+const epAv=await value("insert into public.proyecto_edps(proyecto_id) values('"+prAnt+"') returning id v");
+assert.equal(await value("select numero v from public.proyecto_edps where id='"+epAv+"'"),2);
+await rejects("insert into public.proyecto_edps(proyecto_id,tipo) values('"+pid2+"','otro')",/check/);
+await db.exec("delete from public.proyecto_edps where proyecto_id='"+prAnt+"' and estado='borrador'");
 // Archivos por carpeta de empresa.
 await as(jefe);
 await db.exec("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/a.jpg')");

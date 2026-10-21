@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 process.chdir(path.resolve(__dirname,'..'));
 const context=vm.createContext({document:{addEventListener(){}},Intl,Date,console,Number,Math});
 vm.runInContext(fs.readFileSync('proyectos.js','utf8')+'\nglobalThis.t=Proyectos.test;',context);
-const {calcularEDP,calcularDevolucion,diasEntre}=context.t;
+const {calcularEDP,calcularDevolucion,calcularSolicitudAnticipo,diasEntre}=context.t;
 const avance=obj=>new Map(Object.entries(obj));
 const ep=(p,config,previo,cants)=>calcularEDP(p,config,previo,avance(cants));
 
@@ -61,6 +61,22 @@ assert.equal(d2.totales.descuentoMotivo,'');
 // Los EP guardados antes del descuento (sin la línea) siguen calculando igual.
 const viejo={totales:{acum:{...e1.totales.acum,descuento:undefined}},items:e1.items};
 assert.equal(ep(yeso,cfg,viejo,{a:4,b:4}).totales.per.neto,1667250);
+
+// Solicitud de anticipo: % del subtotal neto del contrato, con IVA y sin retención;
+// después los EP de avance amortizan ese monto (config.anticipo_monto).
+const sa=calcularSolicitudAnticipo(yeso,cfg,20);
+assert.equal(sa.totales.baseAnticipo,7020000);
+assert.equal(sa.totales.per.neto,1404000);
+assert.equal(sa.totales.per.retencion,0);
+assert.equal(sa.totales.impuesto,266760);
+assert.equal(sa.totales.aPagar,1670760);
+assert.equal(sa.totales.solicitudAnticipo,true);
+assert.equal(calcularSolicitudAnticipo(yeso,cfg,150).totales.anticipoPct,100);
+const conGGAnt=calcularSolicitudAnticipo({...yeso,usarGGUtil:true,ggPct:10,utilPct:5},cfg,10);
+assert.equal(conGGAnt.totales.per.neto,807300);
+const tras=ep(yeso,{...cfg,anticipo_monto:sa.totales.per.neto},null,{a:2,b:2});
+assert.equal(tras.totales.per.anticipo,351000);
+assert.equal(tras.totales.per.neto,1755000-351000-87750);
 
 // Gastos generales y utilidad como en el presupuesto.
 const conGG={...yeso,usarGGUtil:true,ggPct:10,utilPct:5};
