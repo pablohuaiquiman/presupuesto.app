@@ -10,3 +10,5 @@ formato orden de compra/
 *.docx
 *.doc
 tests/package-lock.json
+FIMAS/
+FIRMAS/

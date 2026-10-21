@@ -775,6 +775,23 @@
 
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div class="bg-gradient-to-r from-slate-800 to-slate-600 px-6 py-4">
+                <h2 class="text-white text-lg font-bold">Firmas registradas</h2>
+                <p class="text-slate-300 text-xs mt-0.5">Se estampan solas en estados de pago y órdenes de compra cuando firma esa persona</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <div id="firmas-lista" class="divide-y divide-slate-100"></div>
+                <form id="form-firma" onsubmit="onSubmitFirma(event)" class="hidden grid sm:grid-cols-4 gap-2 pt-3 border-t border-slate-100 items-end">
+                    <div><label class="text-xs font-semibold text-slate-500">Nombre de quien firma</label><input id="firma-nombre" required maxlength="120" placeholder="Ej: Héctor Castro" class="campo-input w-full"></div>
+                    <div><label class="text-xs font-semibold text-slate-500">Cargo</label><input id="firma-cargo" maxlength="120" placeholder="Ej: Gerente general" class="campo-input w-full"></div>
+                    <div><label class="text-xs font-semibold text-slate-500">Imagen de la firma</label><input id="firma-archivo" type="file" required accept="image/*" class="campo-input w-full text-xs"></div>
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg transition-colors">Agregar firma</button>
+                    <p class="sm:col-span-4 text-[11px] text-slate-400">Foto o escaneo de la firma sobre papel claro. Se limpia el fondo y queda como trazo de lápiz pasta azul. El nombre debe coincidir con el que aparece en el documento.</p>
+                </form>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-gradient-to-r from-slate-800 to-slate-600 px-6 py-4">
                 <h2 class="text-white text-lg font-bold">Mi equipo</h2>
                 <p class="text-slate-300 text-xs mt-0.5" id="equipo-cupos">—</p>
             </div>
@@ -1078,9 +1095,9 @@
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261007a"></script>
-<script src="app.js?v=20261019d"></script>
+<script src="app.js?v=20261021a"></script>
 <script src="platform.js?v=20261019a"></script>
-<script src="proyectos.js?v=20261021b"></script>
-<script src="compras.js?v=20261007b"></script>
+<script src="proyectos.js?v=20261021d"></script>
+<script src="compras.js?v=20261021a"></script>
 </body>
 </html>

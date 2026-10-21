@@ -321,6 +321,7 @@ function cargarFormularioEmpresa() {
     logoB64Pendiente = undefined;
     document.getElementById('emp-logo-file').value = '';
     mostrarPreviewLogo(e.logo_b64 || null);
+    renderFirmasEmpresa();
 }
 
 function mostrarPreviewLogo(src) {
@@ -393,6 +394,115 @@ async function onSubmitEmpresa(e) {
     logoB64Pendiente = undefined;
     aplicarBranding();
     toast('Datos de la empresa guardados', 'success');
+}
+
+// ── Firmas registradas (empresas.firmas) ───────────────────
+// Se estampan solas en los documentos cuando el firmante coincide por nombre.
+const normalizarNombre = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean);
+// Coincide si todas las palabras del nombre registrado están en el del firmante
+// ("Pablo Huaiquiman" calza con "PABLO HUAIQUIMAN HERRERA").
+function firmaRegistrada(nombre) {
+    const palabras = normalizarNombre(nombre);
+    if (!palabras.length) return null;
+    const f = (empresaActual?.firmas || []).find(x => {
+        const reg = normalizarNombre(x.nombre);
+        return reg.length && reg.every(p => palabras.includes(p));
+    });
+    return f?.firma_b64 || null;
+}
+
+// Firma de la empresa en presupuestos y OT: la cargada en Firma Digital o, si no hay, la registrada del responsable.
+const firmaEmpresaPDF = () => empresaActual?.firma_b64 || firmaRegistrada(empresaActual?.responsable_nombre);
+
+// Convierte la foto o escaneo de una firma en trazo de lápiz pasta azul sobre fondo transparente,
+// recortado al trazo. El fondo claro (papel, blanco) desaparece.
+function procesarFirmaImagen(file) {
+    return new Promise((resolve, reject) => {
+        if (!file?.type?.startsWith('image/')) return reject(new Error('Selecciona una imagen (PNG o JPG) de la firma'));
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen')); };
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const k = Math.min(1, 1000 / Math.max(img.width, img.height));
+            const c = document.createElement('canvas');
+            c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+            const ctx = c.getContext('2d', { willReadFrequently: true });
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            const datos = ctx.getImageData(0, 0, c.width, c.height), px = datos.data;
+            let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+            for (let i = 0; i < px.length; i += 4) {
+                const luz = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+                const alfa = Math.max(0, Math.min(255, (255 - luz - 40) * 3.2)); // trazos claros también quedan nítidos
+                px[i] = 27; px[i + 1] = 47; px[i + 2] = 130; px[i + 3] = alfa; // azul pasta
+                if (alfa > 40) {
+                    const p = i / 4, x = p % c.width, y = (p - x) / c.width;
+                    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+                }
+            }
+            if (x1 < 0) return reject(new Error('No se distingue la firma en la imagen'));
+            ctx.clearRect(0, 0, c.width, c.height);
+            ctx.putImageData(datos, 0, 0);
+            const m = 10, w = x1 - x0 + 1 + 2 * m, hh = y1 - y0 + 1 + 2 * m;
+            const kk = Math.min(1, 600 / w, 240 / hh);
+            const out = document.createElement('canvas');
+            out.width = Math.round(w * kk); out.height = Math.round(hh * kk);
+            out.getContext('2d').drawImage(c, x0 - m, y0 - m, w, hh, 0, 0, out.width, out.height);
+            resolve(out.toDataURL('image/png'));
+        };
+        img.src = url;
+    });
+}
+
+function renderFirmasEmpresa() {
+    const cont = document.getElementById('firmas-lista');
+    if (!cont) return;
+    const admin = miPerfil?.rol === 'admin';
+    const lista = empresaActual?.firmas || [];
+    document.getElementById('form-firma').classList.toggle('hidden', !admin || lista.length >= 10);
+    cont.innerHTML = lista.length ? lista.map(f => `
+        <div class="flex items-center justify-between gap-3 py-2.5">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-36 h-14 shrink-0 rounded-lg border border-slate-200 bg-white flex items-center justify-center"><img src="${esc(f.firma_b64)}" alt="Firma de ${esc(f.nombre)}" class="max-h-12 max-w-full"></div>
+                <div class="min-w-0"><p class="text-sm font-semibold text-slate-700 truncate">${esc(f.nombre)}</p><p class="text-xs text-slate-400 truncate">${esc(f.cargo || '')}</p></div>
+            </div>
+            ${admin ? `<button type="button" onclick="quitarFirmaEmpresa('${esc(f.id)}')" class="text-xs text-red-500 hover:text-red-700 font-semibold">Quitar</button>` : ''}
+        </div>`).join('') : '<p class="text-sm text-slate-400">Todavía no hay firmas registradas.</p>';
+}
+
+async function guardarFirmasEmpresa(firmas, exito) {
+    const { error } = await supa.from('empresas').update({ firmas }).eq('id', empresaActual.id);
+    if (error) {
+        const sinColumna = /firmas/.test(error.message || '') && /column|schema/.test(error.message || '');
+        toast(sinColumna ? 'Para las firmas registradas falta aplicar la migración 202610210002_firmas_empresa.sql' : 'No se pudo guardar: ' + error.message, 'error');
+        return false;
+    }
+    empresaActual.firmas = firmas;
+    renderFirmasEmpresa();
+    toast(exito, 'success');
+    return true;
+}
+
+async function onSubmitFirma(e) {
+    e.preventDefault();
+    const nombre = document.getElementById('firma-nombre').value.trim();
+    const cargo  = document.getElementById('firma-cargo').value.trim();
+    const file   = document.getElementById('firma-archivo').files[0];
+    if (!nombre || !file) return toast('Indica el nombre y elige la imagen de la firma', 'error');
+    const lista = empresaActual.firmas || [];
+    if (lista.some(f => normalizarNombre(f.nombre).join(' ') === normalizarNombre(nombre).join(' '))) return toast('Ya hay una firma registrada con ese nombre', 'error');
+    let firma_b64;
+    try { firma_b64 = await procesarFirmaImagen(file); } catch (error) { return toast(error.message, 'error'); }
+    if (await guardarFirmasEmpresa([...lista, { id: uid(), nombre: nombre.slice(0, 120), cargo: cargo.slice(0, 120), firma_b64 }], `Firma de ${nombre} registrada`)) {
+        e.target.reset();
+    }
+}
+
+async function quitarFirmaEmpresa(id) {
+    const f = (empresaActual.firmas || []).find(x => x.id === id);
+    if (!f || !confirm(`¿Quitar la firma de ${f.nombre}? Ya no aparecerá en los documentos nuevos.`)) return;
+    await guardarFirmasEmpresa(empresaActual.firmas.filter(x => x.id !== id), 'Firma quitada');
 }
 
 async function cargarEquipo() {
@@ -2471,7 +2581,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
   </div>
   <div class="bottom">
     <div class="firma-box">
-      ${empresaActual?.firma_b64?`<img src="${empresaActual.firma_b64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
+      ${firmaEmpresaPDF()?`<img src="${firmaEmpresaPDF()}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
       <div class="firma-lin"></div>
       <div class="firma-emp">${esc(empresaActual?.nombre_comercial || '')}</div>
       <div class="firma-nom">${esc(empresaActual?.responsable_nombre || '')}</div>
@@ -2638,7 +2748,7 @@ tbody td{padding:5px 8px;vertical-align:middle}
   </div>
   <div class="bottom">
     <div class="firma-box">
-      ${empresaActual?.firma_b64?`<img src="${empresaActual.firma_b64}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
+      ${firmaEmpresaPDF()?`<img src="${firmaEmpresaPDF()}" alt="Firma" style="height:50px;margin:0 auto 4px;display:block;">`:''}
       <div class="firma-lin"></div>
       <div class="firma-emp">${esc(empresaActual?.nombre_comercial || '')}</div>
       <div class="firma-nom">${esc(empresaActual?.responsable_nombre || '')}</div>

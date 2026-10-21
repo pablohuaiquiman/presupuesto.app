@@ -170,6 +170,17 @@ const epAv=await value("insert into public.proyecto_edps(proyecto_id) values('"+
 assert.equal(await value("select numero v from public.proyecto_edps where id='"+epAv+"'"),2);
 await rejects("insert into public.proyecto_edps(proyecto_id,tipo) values('"+pid2+"','otro')",/check/);
 await db.exec("delete from public.proyecto_edps where proyecto_id='"+prAnt+"' and estado='borrador'");
+// Firmas registradas de la empresa: solo el administrador las modifica.
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610210002_firmas_empresa.sql','utf8'));
+await as(jefe);
+await db.exec("update public.empresas set firmas='[{\"nombre\":\"Pablo Huaiquiman\",\"firma_b64\":\"data:image/png;base64,AAAA\"}]' where id='"+d+"'");
+assert.equal(await value("select firmas->0->>'nombre' v from public.empresas where id='"+d+"'"),'Pablo Huaiquiman');
+await rejects("update public.empresas set firmas='{}' where id='"+d+"'",/check/);
+await as(obrero);
+await db.exec("update public.empresas set firmas='[]' where id='"+d+"'");
+await as(jefe);
+assert.equal(await value("select jsonb_array_length(firmas) v from public.empresas where id='"+d+"'"),1);
 // Archivos por carpeta de empresa.
 await as(jefe);
 await db.exec("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/a.jpg')");

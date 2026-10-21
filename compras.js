@@ -547,9 +547,13 @@ const Compras = (() => {
         const emp = empresaActual || {}, t = o.totales || {}, prov = o.proveedor || {}, desp = o.despacho || {};
         const filas = (o.items || []).map((it, i) => `<tr><td class="c n">${i + 1}</td><td class="cod">${h(it.codigo)}</td><td>${h(it.detalle)}</td><td class="c">${h(it.unidad)}</td><td class="r">${fmtCant(it.cantidad)}</td><td class="r">${fmtCLP(it.precio)}</td><td class="r b">${fmtCLP(it.total)}</td></tr>`).join('');
         const dato = (label, valor) => `<div class="dt"><span class="cl">${label}</span><span class="cv">${h(valor || '—')}</span></div>`;
-        const firma = (rol, nombre, extra = '') => `<div class="firma"><div class="lin"></div><div class="rol">${rol}</div><div class="nom">${h(nombre || '')}</div>${extra ? `<div class="car">${extra}</div>` : ''}</div>`;
-        const linea = (label, valor, cls = '') => `<div class="tr ${cls}"><span>${label}</span><span>${valor}</span></div>`;
         const borrador = o.estado === 'borrador', anulada = o.estado === 'anulada';
+        // Firma registrada sobre la línea: solo en OC vigentes y, para "Aprobado por", si ya se aprobó.
+        const firma = (rol, nombre, extra = '', estampar = true) => {
+            const img = estampar && !borrador && !anulada && typeof firmaRegistrada === 'function' ? firmaRegistrada(nombre) : null;
+            return `<div class="firma">${img ? `<img src="${img}" alt="Firma" class="fimg">` : '<div class="fimg"></div>'}<div class="lin"></div><div class="rol">${rol}</div><div class="nom">${h(nombre || '')}</div>${extra ? `<div class="car">${extra}</div>` : ''}</div>`;
+        };
+        const linea = (label, valor, cls = '') => `<div class="tr ${cls}"><span>${label}</span><span>${valor}</span></div>`;
         const css = `
 .oc{font-family:'Segoe UI',system-ui,Arial,sans-serif;color:#0f172a;background:#fff}
 .oc *{box-sizing:border-box}
@@ -598,8 +602,9 @@ const Compras = (() => {
 .oc .tr.neto{background:#fffbeb;color:#92400e;font-weight:700}
 .oc .tr.total{background:#0a0f1e;color:#fff;font-size:11pt;font-weight:900;padding:9px 12px;border:0}
 .oc .tr.total span:last-child{color:#f59e0b}
-.oc .firmas{display:flex;justify-content:space-between;gap:24px;margin-top:46px}
+.oc .firmas{display:flex;justify-content:space-between;gap:24px;margin-top:20px}
 .oc .firma{flex:1;text-align:center}
+.oc .firma .fimg{display:block;height:56px;max-width:100%;margin:0 auto 2px;object-fit:contain}
 .oc .firma .lin{border-top:1.5px solid #0a0f1e;margin-bottom:6px}
 .oc .rol{font-size:7pt;font-weight:900;color:#0a0f1e;text-transform:uppercase;letter-spacing:.5px}
 .oc .nom{font-size:8.5pt;font-weight:600;margin-top:2px;min-height:11px}
@@ -648,7 +653,7 @@ const Compras = (() => {
     </div>
     <div class="firmas">
       ${firma('Solicitado por', Proyectos.nombrePerfil(o.solicitado_por), fecha(o.creado_en))}
-      ${firma('Aprobado por', o.aprobado_por ? Proyectos.nombrePerfil(o.aprobado_por) : '', o.aprobado_en ? fecha(o.aprobado_en) : 'Pendiente')}
+      ${firma('Aprobado por', o.aprobado_por ? Proyectos.nombrePerfil(o.aprobado_por) : '', o.aprobado_en ? fecha(o.aprobado_en) : 'Pendiente', !!o.aprobado_por)}
       ${firma('Gerente general', emp.responsable_nombre, h(emp.responsable_cargo || ''))}
     </div>
     <div class="pie"><span>${h(emp.nombre_comercial || '')}${emp.rut ? ' · RUT ' + h(emp.rut) : ''}</span><span>${numeroOC(o)} · Generado ${fecha(hoyChile())}</span></div>

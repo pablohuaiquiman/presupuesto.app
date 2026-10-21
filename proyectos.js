@@ -921,7 +921,8 @@ const Proyectos = (() => {
             <p class="text-xs text-slate-500">El anticipo se descuenta en cada estado de pago en proporción al avance; el que completa el 100 % descuenta el saldo exacto. Los cambios se aplican a los estados de pago que aún no se presentan.${solicitud ? ` El monto lo define la solicitud de anticipo (EP N° ${String(solicitud.numero).padStart(2, '0')}, ${fmtPct(solicitud.totales?.anticipoPct)}).` : ''}</p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 ${campo('VºBº Cliente (nombre)', `<input id="pr-c-f-cliente" maxlength="120" class="campo-input mt-1" value="${h(f.cliente || '')}" ${dis}>`)}
-                ${campo('VºBº Gerencia de proyecto', `<input id="pr-c-f-gerencia" maxlength="120" class="campo-input mt-1" value="${h(f.gerencia_proyecto || '')}" ${dis}>`)}
+                <div>${campo('VºBº Gerencia de proyecto', `<input id="pr-c-f-gerencia" maxlength="120" class="campo-input mt-1" value="${h(f.gerencia_proyecto || '')}" ${dis}>`)}
+                    <label class="flex items-center gap-2 mt-1.5 text-xs text-slate-600"><input id="pr-c-f-gerencia-ver" type="checkbox" ${f.mostrar_gerencia ? 'checked' : ''} ${dis}> Incluir esta firma en el estado de pago</label></div>
                 ${campo('VºBº Gerente general', `<input id="pr-c-f-general" maxlength="120" class="campo-input mt-1" value="${h(f.gerente_general || '')}" ${dis}>`)}
             </div>
             ${g ? `<div class="flex flex-wrap gap-2 justify-between">${esAdminEmpresa() && vacio ? btn('Eliminar proyecto', 'Proyectos.eliminarProyecto()', 'border border-red-300 text-red-600 hover:bg-red-50') : '<span></span>'}<button type="submit" class="text-sm px-4 py-2.5 rounded-lg font-bold bg-blue-700 hover:bg-blue-800 text-white">Guardar configuración</button></div>` : '<p class="text-xs text-slate-500">Solo el administrador del proyecto puede modificar la configuración.</p>'}
@@ -939,7 +940,7 @@ const Proyectos = (() => {
             ...(edpsDe(pr.id).some(e => e.tipo === 'anticipo') ? {} : {
                 anticipo_monto: Math.max(0, numeroDecimal($('pr-c-anticipo').value)), anticipo_fecha: $('pr-c-anticipo-fecha').value || null }),
             retencion_pct: retencion, documento: $('pr-c-documento').value, tasa,
-            firmantes: { cliente: $('pr-c-f-cliente').value.trim(), gerencia_proyecto: $('pr-c-f-gerencia').value.trim(), gerente_general: $('pr-c-f-general').value.trim() },
+            firmantes: { cliente: $('pr-c-f-cliente').value.trim(), gerencia_proyecto: $('pr-c-f-gerencia').value.trim(), mostrar_gerencia: $('pr-c-f-gerencia-ver').checked, gerente_general: $('pr-c-f-general').value.trim() },
         };
         if ($('pr-c-uf')) config.valor_uf_ref = numeroDecimal($('pr-c-uf').value) || null;
         const data = await ejecutar(supa.from('proyectos').update({
@@ -1121,7 +1122,11 @@ const Proyectos = (() => {
         fila += 4;
 
         const f = pr.config?.firmantes || {};
-        [['B', 'D', 'VºBº Cliente', f.cliente], ['F', 'I', 'VºBº Gerencia de proyecto', f.gerencia_proyecto], ['K', 'M', 'VºBº Gerente General', f.gerente_general]].forEach(([a, b, titulo, nombre]) => {
+        // La firma de gerencia de proyecto es opcional (Configuración del proyecto).
+        [['B', 'D', 'VºBº Cliente', f.cliente, false], f.mostrar_gerencia ? ['F', 'I', 'VºBº Gerencia de proyecto', f.gerencia_proyecto, true] : null, ['K', 'M', 'VºBº Gerente General', f.gerente_general, true]].filter(Boolean).forEach(([a, b, titulo, nombre, propia]) => {
+            // Firma registrada sobre la línea (no en borrador ni la del cliente)
+            const img = propia && e.estado !== 'borrador' && typeof firmaRegistrada === 'function' ? firmaRegistrada(nombre) : null;
+            if (img) ws.addImage(wb.addImage({ base64: img, extension: 'png' }), { tl: { col: a.charCodeAt(0) - 65 + 0.4, row: fila - 4 }, ext: { width: 150, height: 58 } });
             ws.mergeCells(`${a}${fila}:${b}${fila}`); set(`${a}${fila}`, titulo, { font: { bold: true }, alignment: { horizontal: 'center' }, border: { top: { style: 'thin' } } });
             ws.mergeCells(`${a}${fila + 1}:${b}${fila + 1}`); set(`${a}${fila + 1}`, nombre || '', { alignment: { horizontal: 'center' } });
         });
@@ -1189,8 +1194,13 @@ const Proyectos = (() => {
             lin('Costo directo', 'cd') + (conGG ? lin(`Gastos generales ${t.ggPct}%`, 'gg') + lin(`Utilidad ${t.utilPct}%`, 'util') : '') + lin('Subtotal neto', 'sub', 'b') + lin('Descuento anticipo', 'anticipo') + lin(`Retención ${t.retPct}%`, 'retencion')
             + (t.acum?.descuento ? lin(`Descuento mandante${t.descuentoMotivo ? ` (${h(t.descuentoMotivo)})` : ''}`, 'descuento') : '') + lin('Total neto', 'neto', 'b');
         const f = pr.config?.firmantes || {};
-        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:56px;text-align:center}.edp .firmas div{border-top:1px solid #0f172a;width:30%;padding-top:4px}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
+        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:24px;text-align:center}.edp .firmas .caja{width:30%}.edp .firmas .linea{border-top:1px solid #0f172a;padding-top:4px}.edp .firmas .firma-img{display:block;height:60px;max-width:100%;margin:0 auto 2px;object-fit:contain}.edp .firmas.dos{justify-content:space-around}.edp .firmas.dos .caja{width:34%}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
         const totalEdps = edpsDe(pr.id).length;
+        // Firma registrada sobre la línea; nunca en borrador ni la del cliente (la pone el mandante).
+        const caja = (titulo, nombre, propia = true) => {
+            const img = propia && e.estado !== 'borrador' && typeof firmaRegistrada === 'function' ? firmaRegistrada(nombre) : null;
+            return `<div class="caja">${img ? `<img src="${img}" alt="Firma" class="firma-img">` : '<div class="firma-img"></div>'}<div class="linea">${titulo}<br>${h(nombre || '')}</div></div>`;
+        };
         const html = `<div class="edp">
             <div class="titulo"><h1>${t.devolucion ? 'DEVOLUCIÓN DE RETENCIONES' : t.solicitudAnticipo ? 'SOLICITUD DE ANTICIPO · ESTADO DE PAGO' : 'ESTADO DE PAGO'} Nº ${String(e.numero).padStart(2, '0')}${e.estado === 'borrador' ? ' (BORRADOR)' : ''}</h1>
                 <span>Proyecto ${h(pr.codigo)} · ${h(pr.nombre)} · Correlativo Nº ${e.numero} de ${totalEdps} del proyecto · ${h(ESTADOS_EDP[e.estado] || e.estado)}</span></div>
@@ -1199,7 +1209,7 @@ const Proyectos = (() => {
             ${items.length ? `<table><thead><tr><th>Detalle</th><th>Un</th><th>Cant.</th><th>P. unitario</th><th>Precio total</th><th>Avance un</th><th>Avance %</th><th>EP actual</th><th>Total a pago</th></tr></thead><tbody>${filas}</tbody></table>` : ''}
             <table><thead><tr><th></th><th>Contrato</th><th>Acumulado</th><th>Anterior</th><th>Este EP</th></tr></thead><tbody>${resumenFilas}</tbody></table>
             <table style="width:45%;margin-left:auto"><tbody><tr><td>Neto este EP</td><td class="r">${M(t.per.neto)}</td></tr>${t.documento === 'exenta' ? '' : `<tr><td>${t.documento === 'boleta_honorarios' ? 'Retención boleta' : 'IVA'} ${t.tasa}%</td><td class="r">${M(t.impuesto)}</td></tr>`}<tr class="pagar b"><td>A PAGAR</td><td class="r">${M(t.aPagar)}</td></tr></tbody></table>
-            <div class="firmas"><div>VºBº Cliente<br>${h(f.cliente || '')}</div><div>VºBº Gerencia de proyecto<br>${h(f.gerencia_proyecto || '')}</div><div>VºBº Gerente General<br>${h(f.gerente_general || '')}</div></div></div>`;
+            <div class="firmas${f.mostrar_gerencia ? '' : ' dos'}">${caja('VºBº Cliente', f.cliente, false)}${f.mostrar_gerencia ? caja('VºBº Gerencia de proyecto', f.gerencia_proyecto) : ''}${caja('VºBº Gerente General', f.gerente_general)}</div></div>`;
         generarPDF(css, html, nombreArchivo(d, 'pdf'));
     }
 

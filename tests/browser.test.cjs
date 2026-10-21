@@ -238,6 +238,7 @@ try {
  assert.equal(ws.getCell('M'+aPagar.row).value.result,1984028);
  assert.ok(celdas.some(c=>c.value?.formula?.startsWith('IF(AND(F')),'Faltan fórmulas de avance');
  assert.ok(celdas.some(c=>c.value==='F-1234'),'Falta la factura en el historial');
+ assert.ok(celdas.some(c=>c.value==='VºBº Gerente General')&&!celdas.some(c=>c.value==='VºBº Gerencia de proyecto'),'El Excel no debe traer la firma de gerencia de proyecto por defecto');
  // PDF del EP: título con N° correlativo y hoja tan ancha como el contenido (nada cortado)
  const pdf=await pp.evaluate(async()=>{
   let opciones,ancho,texto,desborde;
@@ -250,6 +251,10 @@ try {
  });
  assert.match(pdf.texto,/ESTADO DE PAGO Nº 01/);
  assert.match(pdf.texto,/Correlativo Nº 1 de 1 del proyecto/);
+ // Por defecto solo firman el cliente y el gerente general
+ assert.match(pdf.texto,/VºBº Cliente/);
+ assert.match(pdf.texto,/VºBº Gerente General/);
+ assert.doesNotMatch(pdf.texto,/Gerencia de proyecto/);
  assert.equal(pdf.desborde,false,'El PDF del EP tiene contenido cortado a la derecha');
  assert.ok(Math.abs(pdf.formato[0]-pdf.ancho/96)<0.01);
  assert.equal(pdf.orientacion,pdf.formato[0]>pdf.formato[1]?'landscape':'portrait');
@@ -361,6 +366,38 @@ try {
  await pa.locator('input[data-item="a"][data-modo="cant"]').fill('2');
  await pa.locator('input[data-item="b"][data-modo="cant"]').fill('2');
  await pa.locator('#pr-edp-resumen').getByText('$ 351.000').first().waitFor();
+ // La firma de gerencia de proyecto se activa desde Configuración
+ await pa.getByRole('button',{name:'Configuración',exact:true}).click();
+ assert.equal(await pa.locator('#pr-c-f-gerencia-ver').isChecked(),false);
+ await pa.locator('#pr-c-f-gerencia-ver').check();
+ await pa.getByRole('button',{name:'Guardar configuración'}).click();
+ await pa.waitForFunction(()=>window.fixture.tables.proyectos[0].config.firmantes.mostrar_gerencia===true);
+ // Firmas registradas: se suben en Mi Empresa y se estampan en el EP cuando coincide el nombre
+ const imgFirma=Buffer.from((await pa.evaluate(()=>{const c=document.createElement('canvas');c.width=300;c.height=120;const x=c.getContext('2d');
+  x.fillStyle='#fff';x.fillRect(0,0,300,120);x.strokeStyle='#1d4ed8';x.lineWidth=4;x.beginPath();x.moveTo(20,90);x.bezierCurveTo(80,10,160,110,280,30);x.stroke();return c.toDataURL('image/png');})).split(',')[1],'base64');
+ await pa.locator('[data-tab="tab-empresa"]').click();
+ await pa.locator('#firma-nombre').fill('Héctor Castro');
+ await pa.locator('#firma-cargo').fill('Gerente general');
+ await pa.locator('#firma-archivo').setInputFiles({name:'firma.png',mimeType:'image/png',buffer:imgFirma});
+ await pa.getByRole('button',{name:'Agregar firma'}).click();
+ await pa.locator('#firmas-lista').getByText('Héctor Castro').waitFor();
+ const firmas=await pa.evaluate(()=>window.fixture.tables.empresas[0].firmas);
+ assert.equal(firmas.length,1);
+ assert.match(firmas[0].firma_b64,/^data:image\/png;base64,/);
+ assert.ok(await pa.evaluate(()=>!!firmaRegistrada('HECTOR CASTRO ESPINOZA')&&!firmaRegistrada('Nicole Venegas')));
+ await pa.locator('[data-tab="tab-proyectos"]').click();
+ await pa.evaluate(()=>Proyectos.abrir(window.fixture.tables.proyectos[0].id,'config'));
+ await pa.locator('#pr-c-f-general').fill('HÉCTOR CASTRO');
+ await pa.locator('#pr-c-f-cliente').fill('Héctor Castro'); // aunque coincida, la del cliente nunca se estampa
+ await pa.getByRole('button',{name:'Guardar configuración'}).click();
+ await pa.waitForFunction(()=>window.fixture.tables.proyectos[0].config.firmantes.gerente_general==='HÉCTOR CASTRO');
+ const htmlEp=await pa.evaluate(async()=>{let html;const lienzo=document.createElement('canvas');lienzo.width=lienzo.height=10;
+  window.html2pdf=()=>{const api={set(){return api;},from(el){html=el.innerHTML;return api;},toCanvas(){return api;},get:async()=>lienzo,toPdf(){return api;},output:async()=>new Blob(['%PDF'])};return api;};
+  Proyectos.exportarPDF(window.fixture.tables.proyecto_edps.find(x=>x.tipo==='anticipo').id);await new Promise(r=>setTimeout(r,50));return html;});
+ const cajas=htmlEp.split('class="caja"').slice(1);
+ assert.equal(cajas.length,3);
+ assert.doesNotMatch(cajas[0],/<img/,'La firma del cliente no debe estamparse');
+ assert.match(cajas[2],/<img src="data:image\/png/,'Falta la firma del gerente general');
  assert.deepEqual(pa.errores,[]);
  await pa.close();
 
