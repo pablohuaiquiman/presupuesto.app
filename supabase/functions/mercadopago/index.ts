@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
     }
     const { data: s } = await supaAdmin.from('suscripciones').select('*').eq('empresa_id', empresa.id).maybeSingle();
     if (!s) return json({ error: 'Tu empresa no tiene un plan asignado' }, 400);
+    if (s.cortesia) return json({ error: 'Tu empresa tiene una cuenta de cortesía: no hay mensualidades que pagar' }, 400);
     if (s.cancelada) return json({ error: 'La suscripción está cancelada' }, 400);
 
     const desde = fechaCiclo(s.inicio, s.periodos_pagados);
