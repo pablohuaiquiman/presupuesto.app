@@ -2,7 +2,20 @@
    Los permisos reales se validan en Supabase (202610060001_proyectos.sql). */
 const Proyectos = (() => {
     const CATEGORIAS = { materiales: 'Materiales', mano_obra: 'Mano de obra', generales: 'Gastos generales' };
-    const SUBCATEGORIAS = ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Herramientas', 'Arriendo de equipos', 'Hospedaje', 'EPP', 'Movilización'];
+    // Conceptos sugeridos según la categoría del gasto (el campo admite cualquier texto).
+    const SUBCATEGORIAS = {
+        materiales: ['Yeso / volcanita', 'Perfiles metálicos', 'Cemento / hormigón', 'Áridos', 'Fierro', 'Madera', 'Pintura', 'Cerámica / porcelanato', 'Material eléctrico', 'Material sanitario', 'Ferretería y fijaciones', 'Adhesivos y selladores', 'Aislación'],
+        mano_obra: ['Maestro', 'Ayudante', 'Jornal', 'Trato / a destajo', 'Subcontrato', 'Horas extra', 'Leyes sociales', 'Bono de producción', 'Finiquito'],
+        generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'Arriendo de equipos', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
+    };
+    const opcionesConcepto = cat => (SUBCATEGORIAS[cat] || []).map(s => `<option value="${h(s)}">`).join('');
+    const ejemploConcepto = cat => 'Ej: ' + (SUBCATEGORIAS[cat] || []).slice(0, 2).join(', ');
+    // Al cambiar la categoría se cambian las sugerencias del concepto.
+    function cambiarCategoriaGasto(cat) {
+        const lista = $('pr-g-subs'), input = $('pr-g-sub');
+        if (lista) lista.innerHTML = opcionesConcepto(cat);
+        if (input) input.placeholder = ejemploConcepto(cat);
+    }
     const DOCUMENTOS = { factura: 'Factura (suma IVA)', boleta_honorarios: 'Boleta de honorarios (resta retención)', exenta: 'Factura exenta (sin impuesto)' };
     const TASA_DEFECTO = { factura: 19, boleta_honorarios: 15.25, exenta: 0 };
     const TIPOS_DOC = { boleta: 'Boleta', factura: 'Factura', guia: 'Guía de despacho', sin_documento: 'Sin documento' };
@@ -693,8 +706,8 @@ const Proyectos = (() => {
         const opciones = (obj, sel, vacio) => (vacio ? `<option value="">${vacio}</option>` : '') + Object.entries(obj).map(([k, t]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${h(t)}</option>`).join('');
         const formulario = pr.estado === 'activo' ? tarjeta('Registrar gasto', `<form onsubmit="Proyectos.registrarGasto(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             ${campo('Fecha', `<input id="pr-g-fecha" type="date" required class="campo-input mt-1" value="${hoyChile()}" max="${hoyChile()}">`)}
-            ${campo('Categoría', `<select id="pr-g-cat" required class="campo-input mt-1">${opciones(CATEGORIAS, 'materiales')}</select>`)}
-            ${campo('Tipo / concepto', `<input id="pr-g-sub" list="pr-g-subs" maxlength="80" placeholder="Ej: Petróleo, Colaciones" class="campo-input mt-1"><datalist id="pr-g-subs">${SUBCATEGORIAS.map(s => `<option value="${h(s)}">`).join('')}</datalist>`)}
+            ${campo('Categoría', `<select id="pr-g-cat" required onchange="Proyectos.cambiarCategoriaGasto(this.value)" class="campo-input mt-1">${opciones(CATEGORIAS, 'materiales')}</select>`)}
+            ${campo('Tipo / concepto', `<input id="pr-g-sub" list="pr-g-subs" maxlength="80" placeholder="${h(ejemploConcepto('materiales'))}" class="campo-input mt-1"><datalist id="pr-g-subs">${opcionesConcepto('materiales')}</datalist>`)}
             ${campo('Monto total (CLP)', `<input id="pr-g-monto" required inputmode="numeric" placeholder="0" class="campo-input mt-1">`)}
             <div class="sm:col-span-2">${campo('Descripción', `<input id="pr-g-desc" required maxlength="300" class="campo-input mt-1" placeholder="Qué se compró o pagó">`)}</div>
             ${campo('Proveedor', `<input id="pr-g-prov" maxlength="160" class="campo-input mt-1">`)}
@@ -1231,7 +1244,7 @@ const Proyectos = (() => {
     return {
         cargar, render, abrir, volver, vista: cambiarVista, abrirDesdePresupuesto, existePara, resumenPresupuesto,
         seleccionarEdp, editarAvance, editarDescuento, editarAnticipo, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
-        guardarFacturacion, registrarPago, registrarGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
+        guardarFacturacion, registrarPago, registrarGasto, cambiarCategoriaGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
         // Para el módulo de órdenes de compra (compras.js)
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,

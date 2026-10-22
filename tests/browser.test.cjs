@@ -271,7 +271,15 @@ try {
  await pp.waitForFunction(()=>window.fixture.tables.proyecto_edps[0].estado==='pagado');
  assert.equal(await pp.locator('#badge-proyectos').isHidden(),true);
  await pp.getByRole('button',{name:'Gastos',exact:true}).click();
+ // Las sugerencias del concepto dependen de la categoría
+ const conceptos=()=>pp.locator('#pr-g-subs option').evaluateAll(o=>o.map(x=>x.value));
+ assert.ok((await conceptos()).includes('Yeso / volcanita'));
+ assert.ok(!(await conceptos()).includes('Petróleo'));
+ await pp.locator('#pr-g-cat').selectOption('mano_obra');
+ assert.ok((await conceptos()).includes('Maestro'));
  await pp.locator('#pr-g-cat').selectOption('generales');
+ assert.ok((await conceptos()).includes('Petróleo'));
+ assert.match(await pp.locator('#pr-g-sub').getAttribute('placeholder'),/Petróleo/);
  await pp.locator('#pr-g-sub').fill('Petróleo');
  await pp.locator('#pr-g-monto').fill('45.000');
  await pp.locator('#pr-g-desc').fill('Petróleo camioneta');
