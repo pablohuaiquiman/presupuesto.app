@@ -37,6 +37,9 @@
                       border-radius:.9rem; font-weight:800; font-size:1rem; }
         .btn-accion:disabled { opacity:.6; }
         .revisar { background:#fef9c3 !important; border-color:#f59e0b !important; }
+        /* iOS Safari da a los campos de fecha un ancho propio que se sale del formulario. */
+        input[type="date"].campo-input { -webkit-appearance:none; appearance:none; min-width:0; max-width:100%; min-height:3.1rem; text-align:left; }
+        input[type="date"].campo-input::-webkit-date-and-time-value { text-align:left; }
         .chip { display:inline-block; font-size:.7rem; font-weight:700; padding:.15rem .5rem; border-radius:9999px; }
         .miniatura { position:relative; width:4.5rem; height:4.5rem; border-radius:.6rem; overflow:hidden; background:#e2e8f0 center/cover no-repeat;
                      border:1px solid #cbd5e1; flex-shrink:0; }
