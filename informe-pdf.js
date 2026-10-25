@@ -40,8 +40,10 @@ const InformePDF = (() => {
     .ipdf-vacio { display:flex; align-items:center; justify-content:center; font-size:11px; color:#94a3b8; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:3px; }
     .ipdf-com { max-height:64px; overflow:hidden; padding:8px 12px 10px; font-size:11.5px; color:#334155; line-height:1.45; }
     .ipdf-pie { position:absolute; left:44px; right:44px; bottom:22px; display:flex; justify-content:space-between; font-size:9.5px; color:#94a3b8; border-top:1px solid #e2e8f0; padding-top:6px; }
-    .ipdf-firma { margin-top:60px; display:flex; justify-content:flex-end; }
-    .ipdf-firma div { width:260px; border-top:1px solid #0f172a; text-align:center; padding-top:6px; font-size:11px; }
+    .ipdf-firma { margin-top:40px; display:flex; justify-content:flex-end; }
+    .ipdf-firma > div { width:260px; text-align:center; }
+    .ipdf-firma img { display:block; max-height:80px; max-width:230px; margin:0 auto -6px; }
+    .ipdf-firma .linea { border-top:1px solid #0f172a; padding-top:6px; font-size:11px; }
     .ipdf-firma small { display:block; color:#64748b; font-size:10px; }`;
 
     // alto: altura del área de fotos de cada lado, según cuántos bloques caben en la hoja.
@@ -60,8 +62,18 @@ const InformePDF = (() => {
             <div class="ipdf-com">${it.comentario ? texto(it.comentario) : '&nbsp;'}</div></div>`;
     }
 
-    // datos: { empresa, proyecto, informe, autor, cargarFoto: async path => URL usable por html2canvas }
-    async function generar({ empresa, proyecto, informe, autor, cargarFoto }) {
+    // Firma registrada de la empresa (empresas.firmas) por nombre: calza si las palabras de uno están todas
+    // en el otro ("PABLO" calza con "Pablo Huaiquiman" y viceversa). Si varias calzan, no elige ninguna.
+    const palabras = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean);
+    function firmaPara(firmas, nombre) {
+        const n = palabras(nombre);
+        if (!n.length) return null;
+        const calzan = (firmas || []).filter(f => { const r = palabras(f.nombre); return r.length && (r.every(p => n.includes(p)) || n.every(p => r.includes(p))); });
+        return calzan.length === 1 ? calzan[0] : null;
+    }
+
+    // datos: { empresa, proyecto, informe, autor, firma: {nombre, firma_b64} | null, cargarFoto: async path => URL usable por html2canvas }
+    async function generar({ empresa, proyecto, informe, autor, firma, cargarFoto }) {
         if (typeof html2pdf === 'undefined') throw new Error('No se pudo cargar el generador de PDF (revisa tu conexión)');
         const items = informe.items || [];
         const paths = [...new Set(items.flatMap(it => [...(it.antes || []).slice(0, 4), ...(it.despues || []).slice(0, 4)]))];
@@ -70,7 +82,7 @@ const InformePDF = (() => {
 
         const nombreEmp = empresa?.razon_social || empresa?.nombre_comercial || '';
         const cabecera = `<div class="ipdf-cab">${empresa?.logo_b64 ? `<img src="${empresa.logo_b64}">` : `<b style="font-size:18px">${h(nombreEmp)}</b>`}
-            <div class="emp">${empresa?.logo_b64 ? `<b>${h(nombreEmp)}</b><br>` : ''}${empresa?.rut ? `RUT ${h(empresa.rut)}` : ''}${empresa?.direccion ? `<br>${h(empresa.direccion)}` : ''}</div></div>`;
+            <div class="emp">${empresa?.logo_b64 ? `<b>${h(nombreEmp)}</b><br>` : ''}${empresa?.rut ? `RUT ${h(empresa.rut)}` : ''}</div></div>`; // sin dirección de la empresa
         const numero = `${proyecto?.codigo || ''} · ${fechaLarga(informe.fecha)}`;
         const hojas = [];
         // Hoja 1: datos y el primer bloque; luego dos bloques por hoja.
@@ -87,7 +99,7 @@ const InformePDF = (() => {
         for (let i = 0; i < resto.length; i += 2)
             hojas.push(cabecera + resto.slice(i, i + 2).map((it, k) => bloque(it, i + k + 1, urls, 300)).join(''));
         const cierre = `<div class="ipdf-sec" style="margin-top:22px"><h3>Observaciones</h3><p>${informe.observaciones ? texto(informe.observaciones) : 'Sin observaciones.'}</p></div>
-            <div class="ipdf-firma"><div>${h(autor || '')}<small>${h(nombreEmp)}</small></div></div>`;
+            <div class="ipdf-firma"><div>${firma?.firma_b64?.startsWith('data:image/') ? `<img src="${firma.firma_b64}">` : ''}<div class="linea">${h(firma?.nombre || autor || '')}<small>${h(nombreEmp)}</small></div></div></div>`;
         // Las observaciones van en la última hoja si queda espacio (hoja con un solo bloque), si no en una hoja nueva.
         if (items.length === 0 || (resto.length % 2 === 1) || (items.length === 1 && !informe.trabajo_realizado)) hojas[hojas.length - 1] += cierre;
         else hojas.push(cabecera + cierre);
@@ -128,5 +140,12 @@ const InformePDF = (() => {
         setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
-    return { generar, descargar };
+    // Firma del informe: la elegida (firmante); si el informe es anterior a la elección (null), la de su autor.
+    // Un firmante vacío ('') significa "sin firma".
+    function firmaDeInforme(firmas, informe, autor) {
+        if (informe.firmante == null) return firmaPara(firmas, autor);
+        return (firmas || []).find(f => f.nombre === informe.firmante) || null;
+    }
+
+    return { generar, descargar, firmaPara, firmaDeInforme };
 })();

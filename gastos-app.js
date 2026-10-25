@@ -117,7 +117,7 @@ const G = (() => {
         }
         perfil = p;
         const [em, pr, pe, ga, ing, inf] = await Promise.all([
-            supa.from('empresas').select('id,nombre_comercial,razon_social,rut,direccion,logo_b64').eq('id', p.empresa_id).maybeSingle(),
+            supa.from('empresas').select('id,nombre_comercial,razon_social,rut,direccion,logo_b64,firmas').eq('id', p.empresa_id).maybeSingle(),
             supa.from('proyectos').select('*').order('creado_en'),
             supa.from('perfiles').select('id,nombre').eq('empresa_id', p.empresa_id),
             supa.from('proyecto_gastos').select('*').eq('registrado_por', usuario.id).order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(200),
@@ -689,7 +689,8 @@ const G = (() => {
     const bloqueVacio = () => ({ titulo: '', comentario: '', antes: [], despues: [] });
     function nuevoInforme() {
         const pid = proyectos.find(p => p.id === recordado('proyecto'))?.id || proyectos[0]?.id || '';
-        borrador = { proyecto_id: pid, fecha: hoyChile(), titulo: '', ubicacion: '', trabajo_realizado: '', observaciones: '', items: [bloqueVacio()] };
+        borrador = { proyecto_id: pid, fecha: hoyChile(), titulo: '', ubicacion: '', trabajo_realizado: '', observaciones: '', items: [bloqueVacio()],
+            firmante: InformePDF.firmaPara(empresa?.firmas, perfil?.nombre)?.nombre || '' };
         subidosSinGuardar = new Set(); porBorrar = new Set();
         ir('informe');
     }
@@ -698,6 +699,7 @@ const G = (() => {
         if (!inf) return;
         borrador = JSON.parse(JSON.stringify(inf));
         if (!borrador.items?.length) borrador.items = [bloqueVacio()];
+        if (borrador.firmante == null) borrador.firmante = InformePDF.firmaDeInforme(empresa?.firmas, borrador, nombrePerfil(borrador.registrado_por))?.nombre || '';
         subidosSinGuardar = new Set(); porBorrar = new Set();
         ir('informe');
         await firmarUrls(borrador.items.flatMap(it => [...(it.antes || []), ...(it.despues || [])]));
@@ -734,10 +736,22 @@ const G = (() => {
             ${bloques}
             ${editable && b.items.length < 30 ? `<button type="button" onclick="G.agregarBloque()" class="btn-accion border-2 border-dashed border-orange-400 text-orange-700 bg-white">+ Agregar antes / después</button>` : ''}
             <div class="bg-white rounded-2xl shadow-sm p-4"><label class="campo-label">Observaciones</label><textarea ${dis} rows="3" maxlength="2000" oninput="G.campoInforme('observaciones',this.value)" class="campo-input" placeholder="Pendientes, recomendaciones, etc.">${h(b.observaciones)}</textarea></div>
+            ${selectorFirma(b, editable)}
             ${editable ? `<button type="button" id="inf-guardar" onclick="G.guardarInforme(false)" class="btn-accion bg-orange-600 text-white">Guardar informe</button>
                 <button type="button" id="inf-guardar-pdf" onclick="G.guardarInforme(true)" class="btn-accion bg-slate-900 text-white">Guardar y descargar PDF</button>`
                 : `<button type="button" onclick="G.pdfBorrador(this)" class="btn-accion bg-slate-900 text-white">Descargar PDF</button>`}
             <button type="button" onclick="G.ir('informes')" class="btn-accion text-slate-500">Cancelar</button></main>`;
+    }
+    // Firma que se estampa en el PDF: quien administra elige cualquiera de las registradas; el técnico, solo la suya.
+    function selectorFirma(b, editable) {
+        const todas = empresa?.firmas || [];
+        if (!todas.length) return '';
+        const propia = InformePDF.firmaPara(todas, perfil?.nombre);
+        const permitidas = gestiona(proyectoDe(b.proyecto_id)) ? todas : todas.filter(f => f === propia || f.nombre === b.firmante);
+        const opciones = ['<option value="">Sin firma</option>', ...permitidas.map(f => `<option value="${h(f.nombre)}" ${f.nombre === b.firmante ? 'selected' : ''}>${h(f.nombre)}</option>`)].join('');
+        return `<div class="bg-white rounded-2xl shadow-sm p-4"><label class="campo-label" for="inf-firmante">Firma del informe</label>
+            <select id="inf-firmante" ${editable ? '' : 'disabled'} onchange="G.campoInforme('firmante',this.value)" class="campo-input">${opciones}</select>
+            <p class="text-xs text-slate-500 mt-1">Se estampa al final del PDF. Las firmas se registran en Presupuestos Pro → Mi Empresa.</p></div>`;
     }
     function campoInforme(campo, valor) { borrador[campo] = valor; if (campo === 'proyecto_id') recordar('proyecto', valor); }
     function campoBloque(i, campo, valor) { borrador.items[i][campo] = valor; }
@@ -788,7 +802,7 @@ const G = (() => {
         document.querySelectorAll('#inf-guardar,#inf-guardar-pdf').forEach(x => x.disabled = true);
         const fila = {
             fecha: b.fecha || hoyChile(), titulo: b.titulo.trim(), ubicacion: b.ubicacion?.trim() || null,
-            trabajo_realizado: b.trabajo_realizado?.trim() || null, observaciones: b.observaciones?.trim() || null,
+            trabajo_realizado: b.trabajo_realizado?.trim() || null, observaciones: b.observaciones?.trim() || null, firmante: b.firmante ?? null,
             items: b.items.map(it => ({ titulo: (it.titulo || '').trim(), comentario: (it.comentario || '').trim(), antes: it.antes, despues: it.despues })),
         };
         const consulta = b.id
@@ -817,6 +831,7 @@ const G = (() => {
             toast('Generando PDF…');
             const resultado = await InformePDF.generar({
                 empresa, proyecto: proyectoDe(inf.proyecto_id), informe: inf, autor: nombrePerfil(inf.registrado_por || usuario.id),
+                firma: InformePDF.firmaDeInforme(empresa?.firmas, inf, nombrePerfil(inf.registrado_por || usuario.id)),
                 // Las fotos se descargan como blob local: html2canvas no tiene problemas de CORS con ellas.
                 cargarFoto: async path => {
                     const { data, error } = await supa.storage.from('proyectos').download(path);

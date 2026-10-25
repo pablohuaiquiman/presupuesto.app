@@ -889,6 +889,7 @@ const Proyectos = (() => {
         try {
             const resultado = await InformePDF.generar({
                 empresa: empresaActual, proyecto: pr, informe: inf, autor: nombrePerfil(inf.registrado_por),
+                firma: InformePDF.firmaDeInforme(empresaActual?.firmas, inf, nombrePerfil(inf.registrado_por)),
                 cargarFoto: async path => {
                     const { data, error } = await supa.storage.from('proyectos').download(path);
                     if (error) throw error;

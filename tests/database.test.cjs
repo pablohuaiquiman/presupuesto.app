@@ -398,6 +398,12 @@ assert.equal(await value("select categoria v from public.proyecto_gastos where i
 await as(adp);
 await db.exec("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pf+"','2026-10-24','arriendos','Andamio',1000)");
 await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pf+"','2026-10-24','otros','x',1000)",/check/);
+// Firma del informe: el autor elige qué firma registrada se estampa.
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610250003_informe_firmante.sql','utf8'));
+await as(trab);
+await db.exec("update public.proyecto_informes set firmante='Técnico' where id='"+inf+"'");
+assert.equal(await value("select firmante v from public.proyecto_informes where id='"+inf+"'"),'Técnico');
 await db.exec("reset role");
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores y aprobación de órdenes de compra correctos.');
