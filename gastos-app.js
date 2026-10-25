@@ -22,7 +22,7 @@ const G = (() => {
 
     let usuario = null, perfil = null, empresa = null, proyectos = [], perfiles = [];
     let gastos = [], ingresos = [], informes = [];
-    let pantalla = 'inicio', ocupado = false;
+    let pantalla = 'inicio', ocupado = false, filtroGastos = '';
     const pendientes = { gasto: [], ingreso: [] };   // archivos elegidos antes de registrar
     let borrador = null;                              // informe en edición
     let subidosSinGuardar = new Set(), porBorrar = new Set();
@@ -59,6 +59,7 @@ const G = (() => {
 
     // ── Sesión ────────────────────────────────────────────
     async function iniciar() {
+        filtroGastos = recordado('filtro-gastos') || '';
         if (!supa) return render('<p class="p-6 text-center text-red-600">No se pudo conectar. Revisa tu conexión a internet y recarga.</p>');
         supa.auth.onAuthStateChange(evento => { if (evento === 'SIGNED_OUT') { usuario = null; pantallaLogin(); } });
         const { data: { session } } = await supa.auth.getSession();
@@ -295,10 +296,14 @@ const G = (() => {
         if (input) input.placeholder = 'Ej: ' + (SUBCATEGORIAS[cat] || []).slice(0, 2).join(', ');
     }
     function vistaGastos() {
-        const propios = gastos.filter(g => g.origen_fondos === 'propio');
+        // "Mis gastos" se filtra por proyecto; los totales de arriba siguen al filtro.
+        const idsConGastos = [...new Set(gastos.map(g => g.proyecto_id))];
+        if (filtroGastos && !idsConGastos.includes(filtroGastos)) filtroGastos = '';
+        const lista = filtroGastos ? gastos.filter(g => g.proyecto_id === filtroGastos) : gastos;
+        const propios = lista.filter(g => g.origen_fondos === 'propio');
         const porReembolsar = propios.filter(g => g.estado === 'aprobado' && !g.reembolsado_en).reduce((s, g) => s + g.monto, 0);
         const propiosPend = propios.filter(g => g.estado === 'pendiente').reduce((s, g) => s + g.monto, 0);
-        const cajaChica = gastos.filter(g => g.origen_fondos !== 'propio' && g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
+        const cajaChica = lista.filter(g => g.origen_fondos !== 'propio' && g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
         const formulario = proyectos.length ? `<form id="form-gasto" onsubmit="G.registrarGasto(event)" class="bg-white rounded-2xl shadow-sm p-4 space-y-4">
             ${selectorProyecto('g-proyecto')}
             ${camposGasto({})}
@@ -307,14 +312,31 @@ const G = (() => {
             <button type="submit" id="g-enviar" class="btn-accion bg-emerald-600 text-white">Registrar gasto</button>
             <p class="text-xs text-slate-500 text-center">Queda pendiente hasta que lo apruebe el administrador del proyecto.</p>
         </form>` : sinProyectos();
-        const tarjetas = gastos.map(tarjetaGasto).join('');
+        // Un grupo por proyecto (el más reciente primero), con subtotal y cuántos faltan por aprobar.
+        const grupos = [...new Set(lista.map(g => g.proyecto_id))].map(id => {
+            const pr = proyectoDe(id), del = lista.filter(g => g.proyecto_id === id);
+            const total = del.filter(g => g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
+            const pend = del.filter(g => g.estado === 'pendiente').length;
+            return `<details open class="group">
+                <summary class="list-none cursor-pointer flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 mb-2">
+                    <svg class="w-4 h-4 shrink-0 text-emerald-700 transition-transform group-open:rotate-90" viewBox="0 0 20 20" fill="currentColor"><path d="M7 4l7 6-7 6z"/></svg>
+                    <span class="flex-1 min-w-0"><span class="block font-black text-sm truncate">${h(pr?.codigo || 'Proyecto')}${pr?.estado === 'cerrado' ? ' 🔒' : ''}</span>
+                        <span class="block text-xs text-slate-500 truncate">${h(pr?.nombre || '')}</span></span>
+                    <span class="text-right"><span class="block font-black text-sm">${fmtCLP(total)}</span>
+                        <span class="block text-[11px] text-slate-500">${del.length} gasto(s)${pend ? ` · <b class="text-amber-600">${pend} por aprobar</b>` : ''}</span></span>
+                </summary>
+                <div class="space-y-2 mb-3">${del.map(tarjetaGasto).join('')}</div></details>`;
+        }).join('');
+        const filtros = idsConGastos.length > 1 ? `<div class="flex gap-2 overflow-x-auto pb-2 mb-1 -mx-4 px-4">${[['', 'Todos'], ...idsConGastos.map(id => [id, proyectoDe(id)?.codigo || 'Proyecto'])].map(([id, t]) =>
+            `<button type="button" onclick="G.filtrarGastos('${id}')" class="shrink-0 text-xs font-bold px-3 py-2 rounded-full border ${filtroGastos === id ? 'bg-emerald-700 border-emerald-700 text-white' : 'bg-white border-slate-300 text-slate-700'}">${h(t)}</button>`).join('')}</div>` : '';
+        const tarjetas = grupos;
         return `${cabecera('Gastos', 'bg-emerald-700')}<main class="p-4 space-y-4 safe-bottom">${formulario}
-            <section><h2 class="font-black text-lg mb-2">Mis gastos</h2>
+            <section id="mis-gastos"><h2 class="font-black text-lg mb-2">Mis gastos</h2>${filtros}
                 <div class="grid grid-cols-3 gap-2 mb-3 text-center">
                     <div class="bg-white rounded-xl p-2 shadow-sm"><p class="text-[11px] text-slate-500 leading-tight">Por reembolsarte</p><p class="font-black text-violet-700 text-sm">${fmtCLP(porReembolsar)}</p></div>
                     <div class="bg-white rounded-xl p-2 shadow-sm"><p class="text-[11px] text-slate-500 leading-tight">Propio por aprobar</p><p class="font-black text-amber-600 text-sm">${fmtCLP(propiosPend)}</p></div>
                     <div class="bg-white rounded-xl p-2 shadow-sm"><p class="text-[11px] text-slate-500 leading-tight">Caja chica rendida</p><p class="font-black text-slate-700 text-sm">${fmtCLP(cajaChica)}</p></div></div>
-                <div class="space-y-2">${tarjetas || '<p class="text-sm text-slate-400 text-center py-6">Aún no registras gastos.</p>'}</div></section></main>`;
+                <div>${tarjetas || '<p class="text-sm text-slate-400 text-center py-6">Aún no registras gastos.</p>'}</div></section></main>`;
     }
     // Campos del gasto (registrar y editar usan los mismos ids).
     function camposGasto(v) {
@@ -438,6 +460,15 @@ const G = (() => {
         despuesDeRespaldos(data);
     }
     // Repinta solo lo que cambió (en la lista no se pierde lo escrito en el formulario de registro).
+    // Cambia el proyecto de "Mis gastos" sin repintar el formulario de registro (no se pierde lo escrito).
+    function filtrarGastos(id) {
+        filtroGastos = id;
+        recordar('filtro-gastos', id);
+        const tmp = document.createElement('div');
+        tmp.innerHTML = vistaGastos();
+        $('mis-gastos')?.replaceWith(tmp.querySelector('#mis-gastos'));
+        cargarMiniaturasListas();
+    }
     async function despuesDeRespaldos(g) {
         if (!g) return;
         if (pantalla === 'gasto') {
@@ -735,7 +766,7 @@ const G = (() => {
     return {
         ir, salir, verClave, refrescar, elegir, formatearMonto, verArchivo,
         recordarProyecto: v => recordar('proyecto', v),
-        agregarPendientes, quitarPendiente, registrarGasto, editarGasto, guardarGasto, agregarRespaldo, quitarRespaldo, registrarIngreso, eliminar,
+        agregarPendientes, quitarPendiente, registrarGasto, filtrarGastos, editarGasto, guardarGasto, agregarRespaldo, quitarRespaldo, registrarIngreso, eliminar,
         nuevoInforme, abrirInforme, campoInforme, campoBloque, agregarBloque, quitarBloque, agregarFotos, quitarFoto,
         guardarInforme, pdfInforme, pdfBorrador,
     };

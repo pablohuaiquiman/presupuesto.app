@@ -443,6 +443,8 @@ try {
  assert.match(gt.adjuntos[0],/\/gasto\//);
  await pt.getByText('Mis gastos').waitFor();
  assert.ok(await pt.evaluate(()=>document.documentElement.scrollWidth<=390),'Sin scroll horizontal en el celular');
+ assert.match(await pt.locator('#mis-gastos summary').first().innerText(),/CC-101[\s\S]*\$\s?15\.000[\s\S]*1 por aprobar/);
+ await pt.screenshot({path:'tests/artifacts/gastos-movil.png',fullPage:true});
  // Respaldos después de registrar (uno a uno) y corrección del origen del dinero.
  await pt.locator('#gasto-'+gt.id+' input[type=file]:not([capture])').setInputFiles({name:'transferencia.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 t')});
  await pt.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].adjuntos.length===2);
