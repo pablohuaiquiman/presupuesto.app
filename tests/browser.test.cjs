@@ -43,7 +43,8 @@ function mock(opts){
  }
  window.mockClient={auth:{getSession:async()=>({data:{session:{user:{id:u},access_token:'fixture'}}}),onAuthStateChange(){},signOut:async()=>{}},
   from:query,
-  functions:{invoke:async(name,o)=>{window.fixture.calls.push({name,args:o?.body});return name==='mercadopago'?{data:{url:location.origin+'/?mp=aprobado&payment_id=1&status=approved'},error:null}:{data:null,error:null};}},
+  functions:{invoke:async(name,o)=>{window.fixture.calls.push({name,args:o?.body});if(name==='leer-boleta')return {data:{datos:{legible:true,tipo_doc:'factura',numero_doc:'48213',fecha:'2026-10-20',proveedor:'Sodimac S.A.',rut_proveedor:'96.792.430-K',monto_total:45990,descripcion:'Pasta muro y lijas',categoria:'materiales',subcategoria:'Pintura',observacion:null}},error:null};
+   return name==='mercadopago'?{data:{url:location.origin+'/?mp=aprobado&payment_id=1&status=approved'},error:null}:{data:null,error:null};}},
   storage:{from:()=>({upload:async(p)=>{window.fixture.uploads.push(p);return{error:null};},createSignedUrls:async ps=>({data:ps.map(p=>({path:p,signedUrl:'about:blank'})),error:null}),download:async()=>({data:new Blob(['x'],{type:'image/jpeg'}),error:null}),createSignedUrl:async()=>({data:{signedUrl:'about:blank'},error:null}),remove:async()=>({error:null})})},
   async rpc(name,args) {
    window.fixture.calls.push({name,args});
@@ -467,6 +468,26 @@ try {
  await pt.locator('#i-enviar').click(); // sin comprobante: el diálogo de confirmación se acepta
  await pt.waitForFunction(()=>window.fixture.tables.proyecto_ingresos.length===1);
  assert.equal(await pt.evaluate(()=>window.fixture.tables.proyecto_ingresos[0].medio),'transferencia_personal');
+ await pt.locator('button[aria-label="Volver"]').click();
+ // Leer boleta con la cámara: llena los campos para revisar y deja la foto como respaldo.
+ const pngBoleta=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
+ await pt.locator('.btn-grande',{hasText:'Gastos'}).click();
+ await pt.locator('#g-leer input[type=file]').setInputFiles({name:'boleta.png',mimeType:'image/png',buffer:pngBoleta});
+ await pt.getByText('Revisa que los datos estén correctos').waitFor();
+ assert.equal(await pt.locator('#g-monto').inputValue(),'45.990');
+ assert.equal(await pt.locator('#g-fecha').inputValue(),'2026-10-20');
+ assert.equal(await pt.locator('#g-tipodoc').inputValue(),'factura');
+ assert.equal(await pt.locator('#g-prov').inputValue(),'Sodimac S.A. · 96.792.430-K');
+ assert.ok(await pt.locator('#g-monto').evaluate(el=>el.classList.contains('revisar')),'El monto queda marcado para revisar');
+ assert.equal(await pt.locator('#gasto-pendientes .miniatura').count(),1,'La foto queda como respaldo');
+ assert.ok(await pt.evaluate(()=>window.fixture.calls.some(c=>c.name==='leer-boleta'&&c.args.imagen.length>50)));
+ await pt.locator('#g-monto').fill('46990'); // el técnico corrige
+ assert.equal(await pt.locator('#g-monto').evaluate(el=>el.classList.contains('revisar')),false);
+ await pt.locator('#g-enviar').click();
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_gastos.length===2);
+ const leido=await pt.evaluate(()=>window.fixture.tables.proyecto_gastos[1]);
+ assert.equal(leido.monto,46990); assert.equal(leido.numero_doc,'48213'); assert.equal(leido.subcategoria,'Pintura'); assert.equal(leido.adjuntos.length,1);
+ await pt.getByText('Mis gastos').waitFor();
  await pt.locator('button[aria-label="Volver"]').click();
  await pt.locator('.btn-grande',{hasText:'Informe'}).click();
  await pt.getByRole('button',{name:'+ Nuevo informe'}).click();

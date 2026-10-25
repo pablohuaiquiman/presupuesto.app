@@ -306,6 +306,8 @@ const G = (() => {
         const cajaChica = lista.filter(g => g.origen_fondos !== 'propio' && g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
         const formulario = proyectos.length ? `<form id="form-gasto" onsubmit="G.registrarGasto(event)" class="bg-white rounded-2xl shadow-sm p-4 space-y-4">
             ${selectorProyecto('g-proyecto')}
+            <div><label id="g-leer" class="btn-accion bg-gradient-to-r from-blue-600 to-blue-700 text-white cursor-pointer shadow">📷 Leer boleta con la cámara<input type="file" accept="image/*" capture="environment" class="hidden" onchange="G.leerBoleta(this)"></label>
+                <p id="g-leer-aviso" class="text-xs text-slate-500 mt-1.5 text-center">Saca la foto de la boleta o factura y se llenan los datos. Luego revísalos.</p></div>
             ${camposGasto({})}
             <div><span class="campo-label">Respaldos (boleta, factura, transferencia) <span class="font-normal text-slate-400">— también puedes agregarlos después</span></span>${botonesArchivo('gasto', "G.agregarPendientes('gasto',this)")}
                 <div id="gasto-pendientes" class="flex flex-wrap gap-2 mt-2"></div></div>
@@ -488,6 +490,56 @@ const G = (() => {
         }
     }
 
+    // Lee la boleta con la cámara (Edge Function leer-boleta) y prellena el formulario para que el técnico lo revise.
+    // La foto queda además como respaldo del gasto.
+    async function leerBoleta(input) {
+        const file = input.files?.[0];
+        input.value = '';
+        if (!file || ocupado) return;
+        if (!file.type.startsWith('image/')) return toast('Usa una foto de la boleta', 'error');
+        if (pendientes.gasto.length < MAX_ADJUNTOS) {
+            pendientes.gasto.push({ file, url: URL.createObjectURL(file) });
+            pintarPendientes('gasto');
+        }
+        const boton = $('g-leer'), aviso = $('g-leer-aviso');
+        const original = boton.firstChild.textContent;
+        boton.classList.add('opacity-70', 'pointer-events-none');
+        boton.firstChild.textContent = '⏳ Leyendo boleta…';
+        try {
+            const blob = await comprimirImagen(file);
+            const imagen = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+            const { data, error } = await supa.functions.invoke('leer-boleta', { body: { imagen } });
+            if (error || !data?.datos) throw new Error(data?.error || 'sin datos');
+            const d = data.datos;
+            if (!d.legible) throw new Error('ilegible');
+            const llenados = [];
+            const poner = (id, valor) => { const el = $(id); if (el && valor != null && valor !== '') { el.value = valor; llenados.push(el); } };
+            if (d.monto_total > 0) poner('g-monto', d.monto_total.toLocaleString('es-CL'));
+            if (d.fecha && d.fecha <= hoyChile()) poner('g-fecha', d.fecha);
+            poner('g-prov', [d.proveedor, d.rut_proveedor].filter(Boolean).join(' · ').slice(0, 160));
+            if (TIPOS_DOC[d.tipo_doc]) poner('g-tipodoc', d.tipo_doc);
+            poner('g-numdoc', d.numero_doc ? String(d.numero_doc).slice(0, 40) : null);
+            poner('g-desc', d.descripcion ? String(d.descripcion).slice(0, 300) : null);
+            if (CATEGORIAS[d.categoria]) {
+                elegir('g-cat', d.categoria);
+                document.querySelectorAll('[data-grupo="g-cat"].activa').forEach(b => llenados.push(b));
+            }
+            poner('g-sub', d.subcategoria ? String(d.subcategoria).slice(0, 80) : null);
+            // Marca en amarillo lo que llenó la lectura; la marca se va al corregir el campo.
+            llenados.forEach(el => {
+                el.classList.add('revisar');
+                el.addEventListener(el.tagName === 'BUTTON' ? 'click' : 'input', () => el.classList.remove('revisar'), { once: true });
+            });
+            aviso.innerHTML = `<b class="text-amber-700">Revisa que los datos estén correctos</b>${d.observacion ? ` · ${h(d.observacion)}` : ''}. Elige con qué dinero pagaste.`;
+            toast(llenados.length ? 'Boleta leída: revisa los datos' : 'No se encontraron datos, complétalos a mano', llenados.length ? 'success' : 'error');
+        } catch (error) {
+            aviso.innerHTML = '<b class="text-red-600">No se pudo leer la boleta.</b> Saca otra foto con más luz o completa los datos a mano. La foto quedó como respaldo.';
+            toast('No se pudo leer la boleta', 'error');
+        } finally {
+            boton.classList.remove('opacity-70', 'pointer-events-none');
+            boton.firstChild.textContent = original;
+        }
+    }
     async function registrarGasto(ev) {
         ev.preventDefault();
         const pr = proyectoDe($('g-proyecto').value);
@@ -771,7 +823,7 @@ const G = (() => {
     return {
         ir, salir, verClave, refrescar, elegir, formatearMonto, verArchivo,
         recordarProyecto: v => recordar('proyecto', v),
-        agregarPendientes, quitarPendiente, registrarGasto, filtrarGastos, editarGasto, guardarGasto, agregarRespaldo, quitarRespaldo, registrarIngreso, eliminar,
+        agregarPendientes, quitarPendiente, leerBoleta, registrarGasto, filtrarGastos, editarGasto, guardarGasto, agregarRespaldo, quitarRespaldo, registrarIngreso, eliminar,
         nuevoInforme, abrirInforme, campoInforme, campoBloque, agregarBloque, quitarBloque, agregarFotos, quitarFoto,
         guardarInforme, pdfInforme, pdfBorrador,
     };
