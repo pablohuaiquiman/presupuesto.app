@@ -106,6 +106,16 @@ Deno.serve(async (req) => {
     return json({ datos });
   } catch (error) {
     console.error('leer-boleta', error);
-    return json({ error: 'No se pudo leer la boleta, complétala a mano' }, 500);
+    // Motivo concreto para poder diagnosticar desde la app (nunca incluye la llave).
+    let motivo = 'error inesperado';
+    if (error instanceof Anthropic.APIError) {
+      const msg = String(error.message || '');
+      if (error.status === 401) motivo = 'la ANTHROPIC_API_KEY no es válida';
+      else if (error.status === 403) motivo = 'la API key no tiene permiso para este modelo';
+      else if (error.status === 429) motivo = 'demasiadas lecturas seguidas, espera un momento';
+      else if (/credit balance/i.test(msg)) motivo = 'la cuenta de Anthropic no tiene saldo';
+      else motivo = `API ${error.status ?? ''}: ${msg.slice(0, 200)}`;
+    } else if (error instanceof SyntaxError) motivo = 'respuesta no válida del lector';
+    return json({ error: 'No se pudo leer la boleta: ' + motivo }, 500);
   }
 });

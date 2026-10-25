@@ -509,9 +509,15 @@ const G = (() => {
             const blob = await comprimirImagen(file);
             const imagen = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
             const { data, error } = await supa.functions.invoke('leer-boleta', { body: { imagen } });
-            if (error || !data?.datos) throw new Error(data?.error || 'sin datos');
+            if (error) {
+                // Las respuestas con error traen el motivo en el cuerpo (por ejemplo, falta la API key).
+                let motivo = error.message;
+                try { motivo = (await error.context?.json())?.error || motivo; } catch { /* sin cuerpo JSON */ }
+                throw new Error(motivo);
+            }
+            if (!data?.datos) throw new Error('El lector no devolvió datos');
             const d = data.datos;
-            if (!d.legible) throw new Error('ilegible');
+            if (!d.legible) throw new Error('La foto no se ve como una boleta legible');
             const llenados = [];
             const poner = (id, valor) => { const el = $(id); if (el && valor != null && valor !== '') { el.value = valor; llenados.push(el); } };
             if (d.monto_total > 0) poner('g-monto', d.monto_total.toLocaleString('es-CL'));
@@ -533,7 +539,7 @@ const G = (() => {
             aviso.innerHTML = `<b class="text-amber-700">Revisa que los datos estén correctos</b>${d.observacion ? ` · ${h(d.observacion)}` : ''}. Elige con qué dinero pagaste.`;
             toast(llenados.length ? 'Boleta leída: revisa los datos' : 'No se encontraron datos, complétalos a mano', llenados.length ? 'success' : 'error');
         } catch (error) {
-            aviso.innerHTML = '<b class="text-red-600">No se pudo leer la boleta.</b> Saca otra foto con más luz o completa los datos a mano. La foto quedó como respaldo.';
+            aviso.innerHTML = `<b class="text-red-600">No se pudo leer la boleta.</b> ${h(error.message || '')}<br>Completa los datos a mano; la foto quedó como respaldo.`;
             toast('No se pudo leer la boleta', 'error');
         } finally {
             boton.classList.remove('opacity-70', 'pointer-events-none');
