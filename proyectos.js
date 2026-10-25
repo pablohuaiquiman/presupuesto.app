@@ -743,8 +743,10 @@ const Proyectos = (() => {
                 ? `<button type="button" title="Quitar este respaldo" onclick="Proyectos.quitarRespaldo('${x.id}',${i})" class="text-xs px-2 rounded-r-lg border border-l-0 border-slate-300 text-slate-400 hover:text-red-600 hover:bg-red-50">×</button>` : ''}</span>`).join('');
             const agregar = editable && (pr.estado === 'activo' || g) && adj.length < MAX_ADJUNTOS
                 ? `<label class="text-xs px-3 py-2 rounded-lg font-bold transition-colors border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer">+ Respaldo<input type="file" multiple accept="image/*,application/pdf" class="hidden" onchange="Proyectos.agregarRespaldos('${x.id}',this)"></label>` : '';
+            const cambiarOrigen = editable && conTerreno && x.origen_fondos
+                ? btn(x.origen_fondos === 'propio' ? 'Pasar a caja chica' : 'Pasar a dinero propio', `Proyectos.cambiarOrigen('${x.id}')`, 'border border-violet-300 text-violet-700 hover:bg-violet-50') : '';
             const acciones = [
-                respaldos, agregar,
+                respaldos, agregar, cambiarOrigen,
                 g && x.estado === 'pendiente' ? btn('Aprobar', `Proyectos.revisarGasto('${x.id}','aprobado')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
                 g && x.estado === 'pendiente' ? btn('Rechazar', `Proyectos.pedirRechazo('${x.id}')`, 'border border-red-300 text-red-600 hover:bg-red-50') : '',
                 g && x.origen_fondos === 'propio' && x.estado === 'aprobado' ? (x.reembolsado_en
@@ -782,6 +784,17 @@ const Proyectos = (() => {
         return tarjeta('Por reembolsar al personal', `<div class="divide-y divide-slate-100">${[...deudas].map(([id, monto]) =>
             `<div class="flex justify-between py-2 text-sm"><span>${h(nombrePerfil(id))}</span><b class="text-violet-700">${fmtCLP(monto)}</b></div>`).join('')}</div>
             <p class="text-xs text-slate-500 mt-2">Gastos aprobados pagados con dinero propio. Al devolver el dinero, usa "Marcar reembolsado" en cada gasto.</p>`);
+    }
+    // Corrige con qué dinero se pagó (mismo permiso que editar el gasto; si deja de ser propio, se quita el reembolso).
+    async function cambiarOrigen(id) {
+        const x = gastos.find(g => g.id === id);
+        if (!x) return;
+        const nuevo = x.origen_fondos === 'propio' ? 'empresa' : 'propio';
+        if (!confirm(`¿Marcar "${x.descripcion}" como pagado con ${ORIGENES[nuevo].toLowerCase()}?${x.reembolsado_en ? ' Se quitará el reembolso registrado.' : ''}`)) return;
+        const data = await ejecutar(supa.from('proyecto_gastos').update({ origen_fondos: nuevo }).eq('id', id).select().single(), 'Origen del dinero actualizado');
+        if (!data) return;
+        reemplazar(gastos, data);
+        render();
     }
     async function reembolsarGasto(id, marcar) {
         const x = gastos.find(g => g.id === id);
@@ -1399,7 +1412,7 @@ const Proyectos = (() => {
         seleccionarEdp, editarAvance, editarDescuento, editarAnticipo, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
         guardarFacturacion, registrarPago, registrarGasto, cambiarCategoriaGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
-        reembolsarGasto, revisarIngreso, eliminarIngreso, pdfInforme, eliminarInforme,
+        reembolsarGasto, cambiarOrigen, revisarIngreso, eliminarIngreso, pdfInforme, eliminarInforme,
         // Para el módulo de órdenes de compra (compras.js)
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,
         agregarGasto: fila => reemplazar(gastos, fila),

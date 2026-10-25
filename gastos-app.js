@@ -148,9 +148,10 @@ const G = (() => {
             descartarSubidas();
         }
         pantalla = nueva;
-        const vistas = { inicio: vistaInicio, gastos: vistaGastos, ingresos: vistaIngresos, informes: vistaInformes, informe: vistaInforme };
+        const vistas = { inicio: vistaInicio, gastos: vistaGastos, gasto: vistaGasto, ingresos: vistaIngresos, informes: vistaInformes, informe: vistaInforme };
         render((vistas[nueva] || vistaInicio)());
         if (nueva === 'gastos') { cambiarCategoria('materiales'); pintarPendientes('gasto'); }
+        if (nueva === 'gasto') { cambiarCategoria($('g-cat')?.value); despuesDeRespaldos(gastos.find(x => x.id === editandoId)); }
         if (nueva === 'ingresos') pintarPendientes('ingreso');
         if (['gastos', 'ingresos', 'informes'].includes(nueva)) cargarMiniaturasListas();
         window.scrollTo(0, 0);
@@ -300,38 +301,13 @@ const G = (() => {
         const cajaChica = gastos.filter(g => g.origen_fondos !== 'propio' && g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
         const formulario = proyectos.length ? `<form id="form-gasto" onsubmit="G.registrarGasto(event)" class="bg-white rounded-2xl shadow-sm p-4 space-y-4">
             ${selectorProyecto('g-proyecto')}
-            <div><span class="campo-label">¿Con qué dinero pagaste?</span><input type="hidden" id="g-origen" value="empresa">
-                <div class="grid grid-cols-2 gap-2">${opciones('g-origen', { empresa: ['Caja chica empresa', 'Fondos por rendir'], propio: ['Dinero propio', 'Para que te lo devuelvan'] }, 'empresa')}</div></div>
-            <div><label class="campo-label" for="g-monto">Monto total (CLP)</label>
-                <input id="g-monto" required inputmode="numeric" autocomplete="off" placeholder="0" oninput="G.formatearMonto(this)" class="campo-input text-2xl font-black"></div>
-            <div><label class="campo-label" for="g-fecha">Fecha</label><input id="g-fecha" type="date" required class="campo-input" value="${hoyChile()}" max="${hoyChile()}"></div>
-            <div><span class="campo-label">Categoría</span><input type="hidden" id="g-cat" value="materiales">
-                <div class="grid grid-cols-3 gap-2">${opciones('g-cat', CATEGORIAS, 'materiales')}</div></div>
-            <div><label class="campo-label" for="g-sub">Tipo / concepto</label><input id="g-sub" list="g-subs" maxlength="80" class="campo-input"><datalist id="g-subs"></datalist></div>
-            <div><label class="campo-label" for="g-desc">Descripción</label><input id="g-desc" required maxlength="300" class="campo-input" placeholder="Qué se compró o pagó"></div>
-            <div><label class="campo-label" for="g-prov">Proveedor</label><input id="g-prov" maxlength="160" class="campo-input" placeholder="Ej: Sodimac, Easy, ferretería"></div>
-            <div class="grid grid-cols-2 gap-2">
-                <div><label class="campo-label" for="g-tipodoc">Documento</label><select id="g-tipodoc" class="campo-input">${Object.entries(TIPOS_DOC).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-                <div><label class="campo-label" for="g-numdoc">N° documento</label><input id="g-numdoc" maxlength="40" inputmode="numeric" class="campo-input"></div></div>
-            <div><span class="campo-label">Respaldos (boleta, factura, transferencia)</span>${botonesArchivo('gasto', "G.agregarPendientes('gasto',this)")}
+            ${camposGasto({})}
+            <div><span class="campo-label">Respaldos (boleta, factura, transferencia) <span class="font-normal text-slate-400">— también puedes agregarlos después</span></span>${botonesArchivo('gasto', "G.agregarPendientes('gasto',this)")}
                 <div id="gasto-pendientes" class="flex flex-wrap gap-2 mt-2"></div></div>
             <button type="submit" id="g-enviar" class="btn-accion bg-emerald-600 text-white">Registrar gasto</button>
             <p class="text-xs text-slate-500 text-center">Queda pendiente hasta que lo apruebe el administrador del proyecto.</p>
         </form>` : sinProyectos();
-        const tarjetas = gastos.map(g => {
-            const pr = proyectoDe(g.proyecto_id);
-            const reemb = g.origen_fondos === 'propio'
-                ? (g.reembolsado_en ? chip('Reembolsado ' + fecha(g.reembolsado_en), 'bg-emerald-600 text-white') : g.estado === 'aprobado' ? chip('Por reembolsar', 'bg-violet-100 text-violet-800') : '') : '';
-            return `<div class="bg-white rounded-2xl shadow-sm p-3 flex gap-3">
-                ${miniaturaRespaldo(g)}
-                <div class="flex-1 min-w-0">
-                    <div class="flex justify-between gap-2"><p class="font-bold leading-tight">${h(g.descripcion)}</p><p class="font-black whitespace-nowrap">${fmtCLP(g.monto)}</p></div>
-                    <p class="text-xs text-slate-500 mt-0.5">${fecha(g.fecha)} · ${h(pr?.codigo || 'Proyecto')} · ${h(g.subcategoria || CATEGORIAS[g.categoria])}</p>
-                    <div class="flex flex-wrap gap-1 mt-1.5">${chip(ORIGENES[g.origen_fondos] || 'Caja chica', g.origen_fondos === 'propio' ? 'bg-violet-50 text-violet-700 border border-violet-200' : 'bg-slate-100 text-slate-700')}${chip(ESTADOS[g.estado], COLOR_ESTADO[g.estado])}${reemb}</div>
-                    ${g.estado === 'rechazado' && g.motivo_rechazo ? `<p class="text-xs text-red-600 mt-1">Motivo: ${h(g.motivo_rechazo)}</p>` : ''}
-                    ${g.estado === 'pendiente' ? `<button onclick="G.eliminar('gasto','${g.id}')" class="text-xs font-bold text-red-500 mt-1.5">Eliminar</button>` : ''}
-                </div></div>`;
-        }).join('');
+        const tarjetas = gastos.map(tarjetaGasto).join('');
         return `${cabecera('Gastos', 'bg-emerald-700')}<main class="p-4 space-y-4 safe-bottom">${formulario}
             <section><h2 class="font-black text-lg mb-2">Mis gastos</h2>
                 <div class="grid grid-cols-3 gap-2 mb-3 text-center">
@@ -340,6 +316,142 @@ const G = (() => {
                     <div class="bg-white rounded-xl p-2 shadow-sm"><p class="text-[11px] text-slate-500 leading-tight">Caja chica rendida</p><p class="font-black text-slate-700 text-sm">${fmtCLP(cajaChica)}</p></div></div>
                 <div class="space-y-2">${tarjetas || '<p class="text-sm text-slate-400 text-center py-6">Aún no registras gastos.</p>'}</div></section></main>`;
     }
+    // Campos del gasto (registrar y editar usan los mismos ids).
+    function camposGasto(v) {
+        const origen = v.origen_fondos || 'empresa', cat = v.categoria || 'materiales', tipo = v.tipo_doc || 'boleta';
+        return `<div><span class="campo-label">¿Con qué dinero pagaste?</span><input type="hidden" id="g-origen" value="${origen}">
+                <div class="grid grid-cols-2 gap-2">${opciones('g-origen', { empresa: ['Caja chica empresa', 'Fondos por rendir'], propio: ['Dinero propio', 'Para que te lo devuelvan'] }, origen)}</div></div>
+            <div><label class="campo-label" for="g-monto">Monto total (CLP)</label>
+                <input id="g-monto" required inputmode="numeric" autocomplete="off" placeholder="0" oninput="G.formatearMonto(this)" class="campo-input text-2xl font-black" value="${v.monto ? v.monto.toLocaleString('es-CL') : ''}"></div>
+            <div><label class="campo-label" for="g-fecha">Fecha</label><input id="g-fecha" type="date" required class="campo-input" value="${h(v.fecha || hoyChile())}" max="${hoyChile()}"></div>
+            <div><span class="campo-label">Categoría</span><input type="hidden" id="g-cat" value="${cat}">
+                <div class="grid grid-cols-3 gap-2">${opciones('g-cat', CATEGORIAS, cat)}</div></div>
+            <div><label class="campo-label" for="g-sub">Tipo / concepto</label><input id="g-sub" list="g-subs" maxlength="80" class="campo-input" value="${h(v.subcategoria || '')}"><datalist id="g-subs"></datalist></div>
+            <div><label class="campo-label" for="g-desc">Descripción</label><input id="g-desc" required maxlength="300" class="campo-input" placeholder="Qué se compró o pagó" value="${h(v.descripcion || '')}"></div>
+            <div><label class="campo-label" for="g-prov">Proveedor</label><input id="g-prov" maxlength="160" class="campo-input" placeholder="Ej: Sodimac, Easy, ferretería" value="${h(v.proveedor || '')}"></div>
+            <div class="grid grid-cols-2 gap-2">
+                <div><label class="campo-label" for="g-tipodoc">Documento</label><select id="g-tipodoc" class="campo-input">${Object.entries(TIPOS_DOC).map(([k, t]) => `<option value="${k}" ${k === tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+                <div><label class="campo-label" for="g-numdoc">N° documento</label><input id="g-numdoc" maxlength="40" inputmode="numeric" class="campo-input" value="${h(v.numero_doc || '')}"></div></div>`;
+    }
+    const leerCamposGasto = () => ({
+        fecha: $('g-fecha').value, categoria: $('g-cat').value, subcategoria: $('g-sub').value.trim() || null, descripcion: $('g-desc').value.trim(),
+        proveedor: $('g-prov').value.trim() || null, tipo_doc: $('g-tipodoc').value, numero_doc: $('g-numdoc').value.trim() || null,
+        monto: soloDigitos($('g-monto').value), origen_fondos: $('g-origen').value,
+    });
+    // Igual que el trigger validar_gasto: el autor mientras está pendiente; quien administra el proyecto, siempre.
+    const puedeEditarGasto = g => gestiona(proyectoDe(g.proyecto_id)) || (g.registrado_por === usuario?.id && g.estado === 'pendiente');
+    function tarjetaGasto(g) {
+        const pr = proyectoDe(g.proyecto_id), editable = puedeEditarGasto(g), adj = adjuntosDe(g);
+        const reemb = g.origen_fondos === 'propio'
+            ? (g.reembolsado_en ? chip('Reembolsado ' + fecha(g.reembolsado_en), 'bg-emerald-600 text-white') : g.estado === 'aprobado' ? chip('Por reembolsar', 'bg-violet-100 text-violet-800') : '') : '';
+        const acciones = editable ? `<div class="flex flex-wrap gap-2 mt-2">
+                <button onclick="G.editarGasto('${g.id}')" class="text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 text-slate-700">Editar</button>
+                ${adj.length < MAX_ADJUNTOS ? `<label class="text-xs font-bold px-3 py-2 rounded-lg bg-slate-800 text-white cursor-pointer">📷 + Respaldo<input type="file" accept="image/*" capture="environment" class="hidden" onchange="G.agregarRespaldo('${g.id}',this)"></label>
+                <label class="text-xs font-bold px-3 py-2 rounded-lg border border-slate-300 text-slate-700 cursor-pointer">+ Galería / PDF<input type="file" accept="image/*,application/pdf" multiple class="hidden" onchange="G.agregarRespaldo('${g.id}',this)"></label>` : ''}
+                ${g.estado === 'pendiente' ? `<button onclick="G.eliminar('gasto','${g.id}')" class="text-xs font-bold px-2 py-2 text-red-500">Eliminar</button>` : ''}</div>` : '';
+        return `<div id="gasto-${g.id}" class="bg-white rounded-2xl shadow-sm p-3 flex gap-3">
+            ${miniaturaRespaldo(g)}
+            <div class="flex-1 min-w-0">
+                <div class="flex justify-between gap-2"><p class="font-bold leading-tight">${h(g.descripcion)}</p><p class="font-black whitespace-nowrap">${fmtCLP(g.monto)}</p></div>
+                <p class="text-xs text-slate-500 mt-0.5">${fecha(g.fecha)} · ${h(pr?.codigo || 'Proyecto')} · ${h(g.subcategoria || CATEGORIAS[g.categoria])}</p>
+                <div class="flex flex-wrap gap-1 mt-1.5">${chip(ORIGENES[g.origen_fondos] || 'Caja chica', g.origen_fondos === 'propio' ? 'bg-violet-50 text-violet-700 border border-violet-200' : 'bg-slate-100 text-slate-700')}${chip(ESTADOS[g.estado], COLOR_ESTADO[g.estado])}${reemb}${adj.length ? '' : chip('Sin respaldo', 'bg-amber-50 text-amber-700 border border-amber-200')}</div>
+                ${g.estado === 'rechazado' && g.motivo_rechazo ? `<p class="text-xs text-red-600 mt-1">Motivo: ${h(g.motivo_rechazo)}</p>` : ''}
+                ${acciones}
+            </div></div>`;
+    }
+
+    // ── Editar un gasto ya registrado ─────────────────────
+    let editandoId = null;
+    function editarGasto(id) {
+        if (!gastos.some(g => g.id === id)) return;
+        editandoId = id;
+        ir('gasto');
+    }
+    function vistaGasto() {
+        const g = gastos.find(x => x.id === editandoId);
+        if (!g) return vistaGastos();
+        const pr = proyectoDe(g.proyecto_id);
+        return `${cabecera('Editar gasto', 'bg-emerald-700')}<main class="p-4 space-y-4 safe-bottom">
+            <form onsubmit="G.guardarGasto(event)" class="bg-white rounded-2xl shadow-sm p-4 space-y-4">
+                <div><span class="campo-label">Proyecto</span><p class="font-bold">${h(pr ? pr.codigo + ' — ' + pr.nombre : 'Proyecto')}</p></div>
+                ${camposGasto(g)}
+                ${g.reembolsado_en ? '<p class="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Este gasto ya figura como reembolsado. Si lo cambias a caja chica, se quita el reembolso.</p>' : ''}
+                <button type="submit" id="g-guardar" class="btn-accion bg-emerald-600 text-white">Guardar cambios</button>
+                <button type="button" onclick="G.ir('gastos')" class="btn-accion text-slate-500">Volver sin guardar</button>
+            </form>
+            <section class="bg-white rounded-2xl shadow-sm p-4"><span class="campo-label">Respaldos (se guardan apenas los subes)</span>
+                <div id="edit-respaldos" class="flex flex-wrap gap-2 my-2">${respaldosEdicion(g)}</div>
+                ${botonesArchivo('respaldo', `G.agregarRespaldo('${g.id}',this)`)}</section></main>`;
+    }
+    const respaldosEdicion = g => adjuntosDe(g).map((p, i) => `<div class="miniatura cursor-pointer" data-miniatura="${h(p)}" onclick="G.verArchivo('${h(p)}')">${p.endsWith('.pdf') ? '<div class="pdf">PDF</div>' : ''}<button type="button" onclick="event.stopPropagation();G.quitarRespaldo('${g.id}',${i})" aria-label="Quitar">×</button></div>`).join('')
+        || '<p class="text-xs text-slate-400">Sin respaldos todavía.</p>';
+    async function guardarGasto(ev) {
+        ev.preventDefault();
+        const campos = leerCamposGasto();
+        if (!(campos.monto > 0)) return toast('Indica un monto mayor que cero', 'error');
+        if (ocupado) return;
+        ocupado = true;
+        const boton = $('g-guardar'); boton.disabled = true; boton.textContent = 'Guardando…';
+        const { data, error } = await supa.from('proyecto_gastos').update(campos).eq('id', editandoId).select().single();
+        ocupado = false;
+        if (error) { boton.disabled = false; boton.textContent = 'Guardar cambios'; return toast('No se pudo guardar: ' + error.message, 'error'); }
+        reemplazarGasto(data);
+        toast('Gasto actualizado', 'success');
+        ir('gastos');
+    }
+    function reemplazarGasto(fila) { const i = gastos.findIndex(x => x.id === fila.id); if (i >= 0) gastos[i] = fila; }
+    // Sube respaldos a un gasto ya registrado (uno a uno o varios) y los guarda de inmediato.
+    async function agregarRespaldo(id, input) {
+        const archivos = [...(input.files || [])];
+        input.value = '';
+        const g = gastos.find(x => x.id === id);
+        if (!g || !archivos.length || ocupado) return;
+        const actuales = adjuntosDe(g);
+        if (actuales.length + archivos.length > MAX_ADJUNTOS) return toast(`Máximo ${MAX_ADJUNTOS} respaldos por gasto`, 'error');
+        ocupado = true;
+        toast(archivos.length > 1 ? `Subiendo ${archivos.length} respaldos…` : 'Subiendo respaldo…');
+        let paths = [];
+        try {
+            paths = await subirVarios(archivos, { id: g.proyecto_id, empresa_id: g.empresa_id }, 'gasto');
+            const nuevos = [...actuales, ...paths];
+            const { data, error } = await supa.from('proyecto_gastos').update({ adjuntos: nuevos, adjunto_path: nuevos[0] }).eq('id', id).select().single();
+            if (error) throw error;
+            reemplazarGasto(data);
+            toast(paths.length > 1 ? `${paths.length} respaldos agregados` : 'Respaldo agregado', 'success');
+            despuesDeRespaldos(data);
+        } catch (error) {
+            if (paths.length) supa.storage.from('proyectos').remove(paths);
+            toast('No se pudo agregar el respaldo: ' + (error.message || error), 'error');
+        } finally { ocupado = false; }
+    }
+    async function quitarRespaldo(id, i) {
+        const g = gastos.find(x => x.id === id), actuales = g ? adjuntosDe(g) : [], path = actuales[i];
+        if (!path || ocupado || !confirm('¿Quitar este respaldo?')) return;
+        ocupado = true;
+        const nuevos = actuales.filter((_, k) => k !== i);
+        const { data, error } = await supa.from('proyecto_gastos').update({ adjuntos: nuevos, adjunto_path: nuevos[0] || null }).eq('id', id).select().single();
+        ocupado = false;
+        if (error) return toast('No se pudo quitar: ' + error.message, 'error');
+        supa.storage.from('proyectos').remove([path]);
+        reemplazarGasto(data);
+        toast('Respaldo quitado', 'success');
+        despuesDeRespaldos(data);
+    }
+    // Repinta solo lo que cambió (en la lista no se pierde lo escrito en el formulario de registro).
+    async function despuesDeRespaldos(g) {
+        if (!g) return;
+        if (pantalla === 'gasto') {
+            const cont = $('edit-respaldos');
+            if (cont) cont.innerHTML = respaldosEdicion(g);
+            await firmarUrls(adjuntosDe(g));
+            document.querySelectorAll('#edit-respaldos [data-miniatura]').forEach(el => { const u = urls.get(el.dataset.miniatura); if (u) el.style.backgroundImage = `url('${u}')`; });
+        } else {
+            const el = $('gasto-' + g.id);
+            if (el) el.outerHTML = tarjetaGasto(g);
+            cargarMiniaturasListas();
+        }
+    }
+
     async function registrarGasto(ev) {
         ev.preventDefault();
         const pr = proyectoDe($('g-proyecto').value);
@@ -353,10 +465,7 @@ const G = (() => {
         try {
             paths = await subirVarios(pendientes.gasto.map(x => x.file), pr, 'gasto');
             const { data, error } = await supa.from('proyecto_gastos').insert({
-                proyecto_id: pr.id, empresa_id: pr.empresa_id, fecha: $('g-fecha').value, categoria: $('g-cat').value,
-                subcategoria: $('g-sub').value.trim() || null, descripcion: $('g-desc').value.trim(),
-                proveedor: $('g-prov').value.trim() || null, tipo_doc: $('g-tipodoc').value, numero_doc: $('g-numdoc').value.trim() || null,
-                monto, origen_fondos: $('g-origen').value, adjunto_path: paths[0] || null, adjuntos: paths,
+                proyecto_id: pr.id, empresa_id: pr.empresa_id, ...leerCamposGasto(), adjunto_path: paths[0] || null, adjuntos: paths,
             }).select().single();
             if (error) throw error;
             gastos.unshift(data);
@@ -626,7 +735,7 @@ const G = (() => {
     return {
         ir, salir, verClave, refrescar, elegir, formatearMonto, verArchivo,
         recordarProyecto: v => recordar('proyecto', v),
-        agregarPendientes, quitarPendiente, registrarGasto, registrarIngreso, eliminar,
+        agregarPendientes, quitarPendiente, registrarGasto, editarGasto, guardarGasto, agregarRespaldo, quitarRespaldo, registrarIngreso, eliminar,
         nuevoInforme, abrirInforme, campoInforme, campoBloque, agregarBloque, quitarBloque, agregarFotos, quitarFoto,
         guardarInforme, pdfInforme, pdfBorrador,
     };

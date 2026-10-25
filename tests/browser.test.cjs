@@ -443,6 +443,19 @@ try {
  assert.match(gt.adjuntos[0],/\/gasto\//);
  await pt.getByText('Mis gastos').waitFor();
  assert.ok(await pt.evaluate(()=>document.documentElement.scrollWidth<=390),'Sin scroll horizontal en el celular');
+ // Respaldos después de registrar (uno a uno) y corrección del origen del dinero.
+ await pt.locator('#gasto-'+gt.id+' input[type=file]:not([capture])').setInputFiles({name:'transferencia.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 t')});
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].adjuntos.length===2);
+ await pt.locator('#gasto-'+gt.id).getByRole('button',{name:'Editar'}).click();
+ assert.equal(await pt.locator('#g-desc').inputValue(),'Petróleo camioneta');
+ assert.equal(await pt.locator('#g-monto').inputValue(),'15.000');
+ await pt.locator('#edit-respaldos .miniatura').nth(1).waitFor();
+ await pt.locator('[data-grupo="g-origen"][data-valor="empresa"]').click();
+ await pt.locator('#g-monto').fill('16500');
+ await pt.locator('#g-guardar').click();
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_gastos[0].origen_fondos==='empresa');
+ assert.equal(await pt.evaluate(()=>window.fixture.tables.proyecto_gastos[0].monto),16500);
+ await pt.getByText('Mis gastos').waitFor();
  await pt.locator('button[aria-label="Volver"]').click();
  await pt.locator('.btn-grande',{hasText:'Ingresos'}).click();
  await pt.locator('[data-grupo="i-medio"][data-valor="transferencia_personal"]').click();
