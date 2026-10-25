@@ -330,6 +330,54 @@ await db.exec("select public.crear_empresa_y_admin('Empresa nueva','Usuario nuev
 await rejects("select public.crear_empresa_y_admin('Otra','x')",/ya tiene una empresa/);
 await db.exec("reset role");
 assert.equal(await value("select (aprobada=false and limite_usuarios=1)::text v from public.empresas where nombre_comercial='Empresa nueva'"),'true');
+// App de terreno: personal asignado, origen del dinero, reembolsos, ingresos e informes.
+await db.exec(fs.readFileSync('supabase/migrations/202610240001_app_terreno.sql','utf8'));
+const gastoF=(desc,origen)=>"insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto,origen_fondos) values('"+pf+"','2026-10-24','generales','"+desc+"',15000,'"+origen+"') returning id v";
+await as(trab);
+await rejects(gastoF('Petróleo','propio'),/No estás asignado/);
+await db.exec("update public.proyectos set asignados=array['"+trab+"'::uuid] where id='"+pf+"'"); // sin permiso: RLS no actualiza nada
+assert.equal(await value("select cardinality(asignados) v from public.proyectos where id='"+pf+"'"),0);
+await as(adp);
+await rejects("update public.proyectos set asignados=array['"+otro+"'::uuid] where id='"+pf+"'",/pertenecer a la empresa/);
+await db.exec("update public.proyectos set asignados=array['"+trab+"'::uuid,'"+trab+"'::uuid] where id='"+pf+"'");
+assert.equal(await value("select cardinality(asignados) v from public.proyectos where id='"+pf+"'"),1);
+await as(trab);
+const gp=await value(gastoF('Petróleo','propio'));
+const gc=await value(gastoF('Colación','empresa'));
+await rejects("update public.proyecto_gastos set reembolsado_en='2026-10-25' where id='"+gp+"'",/Solo el administrador/);
+await as(adp);
+await rejects("update public.proyecto_gastos set reembolsado_en='2026-10-25' where id='"+gp+"'",/aprobados/);
+await db.exec("update public.proyecto_gastos set estado='aprobado' where id in ('"+gp+"','"+gc+"')");
+await rejects("update public.proyecto_gastos set reembolsado_en='2026-10-25' where id='"+gc+"'",/dinero propio/);
+await db.exec("update public.proyecto_gastos set reembolsado_en='2026-10-25' where id='"+gp+"'");
+assert.equal(await value("select reembolsado_por::text v from public.proyecto_gastos where id='"+gp+"'"),adp);
+await db.exec("update public.proyecto_gastos set estado='pendiente' where id='"+gp+"'");
+assert.equal(await value("select (reembolsado_en is null and reembolsado_por is null) v from public.proyecto_gastos where id='"+gp+"'"),true);
+// Ingresos: el trabajador registra, solo el encargado autoriza.
+await as(gpro);
+await rejects("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion) values('"+pf+"','2026-10-24',50000,'efectivo','Pago') returning id",/No estás asignado/);
+await as(trab);
+const ing=await value("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion,estado) values('"+pf+"','2026-10-24',80000,'transferencia_personal','Adelanto del cliente','aprobado') returning id v");
+assert.equal(await value("select estado||registrado_por::text v from public.proyecto_ingresos where id='"+ing+"'"),'pendiente'+trab);
+await rejects("update public.proyecto_ingresos set estado='aprobado' where id='"+ing+"'",/encargado/);
+await rejects("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion) values('"+pf+"','2026-10-24',1,'cheque','x')",/check/);
+await as(adp);
+await db.exec("update public.proyecto_ingresos set estado='aprobado' where id='"+ing+"'");
+assert.equal(await value("select revisado_por::text v from public.proyecto_ingresos where id='"+ing+"'"),adp);
+await as(trab);
+await rejects("update public.proyecto_ingresos set monto=1 where id='"+ing+"'",/pendientes/);
+// Informes: crea el asignado; edita el autor o el encargado.
+const inf=await value("insert into public.proyecto_informes(proyecto_id,fecha,titulo,items) values('"+pf+"','2026-10-24','Remates piso 3','[{\"titulo\":\"Muro\",\"antes\":[],\"despues\":[]}]') returning id v");
+await db.exec("update public.proyecto_informes set observaciones='Listo' where id='"+inf+"'");
+await rejects("insert into public.proyecto_informes(proyecto_id,fecha,titulo,items) values('"+pf+"','2026-10-24','x','{}')",/check/);
+await as(gpro);
+await rejects("insert into public.proyecto_informes(proyecto_id,fecha,titulo) values('"+pf+"','2026-10-24','Ajeno')",/row-level security/);
+await db.exec("update public.proyecto_informes set titulo='Cambiado' where id='"+inf+"'");
+assert.equal(await value("select titulo v from public.proyecto_informes where id='"+inf+"'"),'Remates piso 3');
+await as(adp);
+await db.exec("update public.proyecto_informes set titulo='Revisado' where id='"+inf+"'");
+assert.equal(await value("select titulo||registrado_por::text v from public.proyecto_informes where id='"+inf+"'"),'Revisado'+trab);
+await db.exec("reset role");
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores y aprobación de órdenes de compra correctos.');
 })().catch(e=>{console.error(e.message);process.exit(1);});

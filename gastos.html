@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Gastos Presupuestos Pro</title>
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Gastos Pro">
+    <link rel="manifest" href="gastos.webmanifest">
+    <link rel="icon" type="image/png" href="assets/presupuestos-pro-64.png">
+    <link rel="apple-touch-icon" href="assets/presupuestos-pro-192.png">
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js" integrity="sha384-aBc0BOllaGWrQx51DYt978St/L7B+21jzNGc4N/jnGD0NxGwj8S/ftRgW0AkXIak" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+    <style>
+        body { background:#f1f5f9; -webkit-tap-highlight-color:transparent; }
+        .campo-label { display:block; font-size:.8rem; font-weight:700; color:#475569; margin-bottom:.3rem; }
+        .campo-input { display:block; width:100%; padding:.8rem .9rem; border:1px solid #cbd5e1; border-radius:.75rem;
+                       font-size:1rem; background:#fff; outline:none; transition:box-shadow .15s, border-color .15s; }
+        .campo-input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.2); }
+        select.campo-input { background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+                             background-position:right .6rem center; background-repeat:no-repeat; background-size:1.3em;
+                             padding-right:2.4rem; -webkit-appearance:none; appearance:none; }
+        .opcion { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.2rem; min-height:4.25rem;
+                  padding:.6rem; border:2px solid #cbd5e1; border-radius:.9rem; background:#fff; font-weight:700; font-size:.9rem;
+                  color:#334155; text-align:center; line-height:1.15; transition:all .15s; }
+        .opcion small { font-weight:500; font-size:.72rem; color:#64748b; }
+        .opcion.activa { border-color:#1d4ed8; background:#eff6ff; color:#1d4ed8; box-shadow:0 0 0 3px rgba(29,78,216,.15); }
+        .btn-grande { display:flex; align-items:center; gap:1rem; width:100%; padding:1.4rem 1.25rem; border-radius:1.25rem;
+                      color:#fff; text-align:left; box-shadow:0 6px 18px rgba(15,23,42,.18); transition:transform .1s; }
+        .btn-grande:active { transform:scale(.98); }
+        .btn-grande svg { width:2.75rem; height:2.75rem; flex-shrink:0; }
+        .btn-grande b { display:block; font-size:1.35rem; }
+        .btn-grande span { font-size:.85rem; opacity:.85; }
+        .btn-accion { display:flex; align-items:center; justify-content:center; gap:.5rem; width:100%; min-height:3.5rem;
+                      border-radius:.9rem; font-weight:800; font-size:1rem; }
+        .btn-accion:disabled { opacity:.6; }
+        .chip { display:inline-block; font-size:.7rem; font-weight:700; padding:.15rem .5rem; border-radius:9999px; }
+        .miniatura { position:relative; width:4.5rem; height:4.5rem; border-radius:.6rem; overflow:hidden; background:#e2e8f0 center/cover no-repeat;
+                     border:1px solid #cbd5e1; flex-shrink:0; }
+        .miniatura button { position:absolute; top:2px; right:2px; width:1.5rem; height:1.5rem; border-radius:9999px; background:rgba(15,23,42,.75);
+                            color:#fff; font-size:.9rem; line-height:1; }
+        .miniatura .pdf { display:flex; align-items:center; justify-content:center; height:100%; font-size:.75rem; font-weight:800; color:#475569; }
+        .safe-top { padding-top:max(env(safe-area-inset-top), .75rem); }
+        .safe-bottom { padding-bottom:max(env(safe-area-inset-bottom), 1.5rem); }
+    </style>
+</head>
+<body class="min-h-screen text-slate-900">
+    <!-- Contenido generado por gastos-app.js -->
+    <div id="app" class="max-w-lg mx-auto min-h-screen"></div>
+    <div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-6 z-50 hidden max-w-[92vw] px-4 py-3 rounded-xl shadow-lg text-sm font-semibold text-white"></div>
+    <script src="informe-pdf.js?v=20261024a"></script>
+    <script src="gastos-app.js?v=20261024a"></script>
+</body>
+</html>

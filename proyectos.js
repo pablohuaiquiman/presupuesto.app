@@ -24,8 +24,12 @@ const Proyectos = (() => {
     const ESTADOS_GASTO = { pendiente: 'Pendiente', aprobado: 'Aprobado', rechazado: 'Rechazado' };
     const COLOR_GASTO = { pendiente: 'bg-amber-100 text-amber-800', aprobado: 'bg-emerald-100 text-emerald-800', rechazado: 'bg-red-100 text-red-700' };
     const LINEAS = ['cd', 'gg', 'util', 'sub', 'anticipo', 'retencion', 'descuento', 'neto'];
+    // App de terreno (gastos.html): origen del dinero del gasto, ingresos recibidos en obra e informes de trabajo.
+    const ORIGENES = { empresa: 'Caja chica', propio: 'Dinero propio' };
+    const MEDIOS = { transferencia_empresa: 'Transferencia a la empresa', transferencia_personal: 'Transferencia al trabajador', efectivo: 'Efectivo' };
 
-    let disponible = false, proyectos = [], edps = [], gastos = [], perfiles = [];
+    let disponible = false, proyectos = [], edps = [], gastos = [], perfiles = [], ingresos = [], informes = [];
+    let conTerreno = true; // se apaga si la migración 202610240001_app_terreno.sql aún no está aplicada
     let actualId = null, vista = 'resumen', edpSelId = null, cantidades = null, ajusteEdp = null, anticipoPctEdp = 0;
     let filtroCat = '', filtroEstado = '', rechazandoId = null, ocupado = false;
     // Varios respaldos por gasto (columna proyecto_gastos.adjuntos). Se apaga si la migración aún no está aplicada.
@@ -135,6 +139,9 @@ const Proyectos = (() => {
     const presupuestoDe = pr => presupuestos.find(p => p.id === pr.presupuesto_id) || null;
     const edpsDe = id => edps.filter(e => e.proyecto_id === id).sort((a, b) => a.numero - b.numero);
     const gastosDe = id => gastos.filter(g => g.proyecto_id === id).sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || (b.creado_en || '').localeCompare(a.creado_en || ''));
+    const porFecha = (a, b) => (b.fecha || '').localeCompare(a.fecha || '') || (b.creado_en || '').localeCompare(a.creado_en || '');
+    const ingresosDe = id => ingresos.filter(x => x.proyecto_id === id).sort(porFecha);
+    const informesDe = id => informes.filter(x => x.proyecto_id === id).sort(porFecha);
     const esAdminEmpresa = () => miPerfil?.rol === 'admin';
     const gestiona = pr => esAdminEmpresa() || (!!pr.administrador_id && pr.administrador_id === miPerfil?.id);
     const nombrePerfil = id => perfiles.find(x => x.id === id)?.nombre || '—';
@@ -146,12 +153,16 @@ const Proyectos = (() => {
 
     async function cargar() {
         if (!supa || !empresaActual) return;
-        const [pr, ed, ga, pe] = await Promise.all([
+        const [pr, ed, ga, pe, ing, inf] = await Promise.all([
             supa.from('proyectos').select('*').order('creado_en'),
             supa.from('proyecto_edps').select('*').order('numero'),
             supa.from('proyecto_gastos').select('*').order('fecha', { ascending: false }),
             supa.from('perfiles').select('id,nombre,rol').eq('empresa_id', empresaActual.id),
+            supa.from('proyecto_ingresos').select('*').order('fecha', { ascending: false }),
+            supa.from('proyecto_informes').select('*').order('fecha', { ascending: false }),
         ]);
+        conTerreno = !ing.error && !inf.error;
+        ingresos = ing.data || []; informes = inf.data || [];
         const faltaTabla = pr.error && (['42P01', 'PGRST205', 'PGRST202'].includes(pr.error.code) || /proyectos/.test(pr.error.message || ''));
         disponible = !faltaTabla;
         $('nav-proyectos')?.classList.toggle('hidden', !disponible);
@@ -297,7 +308,8 @@ const Proyectos = (() => {
         const pendientes = sinProyecto.length ? tarjeta('Adjudicados sin centro de costo', `<div class="flex flex-wrap gap-2">${sinProyecto.map(p =>
             `<button type="button" onclick="Proyectos.abrirDesdePresupuesto('${p.id}')" class="text-xs px-3 py-2 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-semibold">${h(p.numero)} — ${h(p.cliente.nombre)}</button>`).join('')}</div><p class="text-xs text-slate-400 mt-2">${esAdminEmpresa() ? 'Haz clic para abrir el centro de costo y pasarlo a ejecución.' : 'El administrador de la empresa abre los centros de costo.'}</p>`) : '';
         return `<div class="space-y-5">
-            <div class="bg-gradient-to-r from-slate-900 to-slate-700 rounded-2xl px-6 py-5"><h2 class="text-white text-lg font-bold">Ejecución de proyectos</h2><p class="text-slate-300 text-xs mt-0.5">Centros de costo, estados de pago, cobranza y gastos de obra.</p></div>
+            <div class="bg-gradient-to-r from-slate-900 to-slate-700 rounded-2xl px-6 py-5 flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-white text-lg font-bold">Ejecución de proyectos</h2><p class="text-slate-300 text-xs mt-0.5">Centros de costo, estados de pago, cobranza y gastos de obra.</p></div>
+                ${conTerreno ? '<a href="gastos.html" target="_blank" class="text-xs font-bold px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white">📱 App de terreno (gastos, ingresos, informes)</a>' : ''}</div>
             ${cobranzaHtml}
             ${cards ? `<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">${cards}</div>` : '<div class="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400"><p class="font-semibold">Sin proyectos en ejecución</p><p class="text-xs mt-1">Abre un centro de costo desde un presupuesto adjudicado o una orden de trabajo.</p></div>'}
             ${pendientes}
@@ -308,9 +320,12 @@ const Proyectos = (() => {
         const p = presupuestoDe(pr);
         if (!p) return `<div class="bg-white rounded-2xl border p-8 text-center"><p class="font-semibold">No se encontró el presupuesto de este proyecto.</p>${btn('Volver', 'Proyectos.volver()', 'bg-slate-700 text-white mt-3')}</div>`;
         const conCompras = typeof Compras !== 'undefined' && Compras.disponible;
+        const pendIng = ingresosDe(pr.id).filter(x => x.estado === 'pendiente').length;
         const pestañas = [['resumen', 'Resumen'], ['presupuesto', 'Presupuesto y OT'], ['edps', 'Estados de pago'], ['gastos', 'Gastos'],
+            ...(conTerreno ? [['ingresos', pendIng ? `Ingresos (${pendIng})` : 'Ingresos'], ['informes', 'Informes']] : []),
             ...(conCompras ? [['compras', 'Órdenes de compra']] : []), ['config', 'Configuración']];
         const cuerpo = { resumen: resumenHtml, presupuesto: presupuestoHtml, edps: edpsHtml, gastos: gastosHtml, config: configHtml,
+            ingresos: conTerreno ? ingresosHtml : null, informes: conTerreno ? informesHtml : null,
             compras: conCompras ? pr => Compras.htmlProyecto(pr) : null }[vista] || resumenHtml;
         return `<div class="space-y-4">
             <div class="bg-gradient-to-r from-slate-900 to-slate-700 rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3 justify-between">
@@ -713,6 +728,7 @@ const Proyectos = (() => {
             ${campo('Proveedor', `<input id="pr-g-prov" maxlength="160" class="campo-input mt-1">`)}
             ${campo('Documento', `<select id="pr-g-tipodoc" class="campo-input mt-1">${opciones(TIPOS_DOC, 'boleta')}</select>`)}
             ${campo('N° documento', `<input id="pr-g-numdoc" maxlength="40" class="campo-input mt-1">`)}
+            ${conTerreno ? campo('Pagado con', `<select id="pr-g-origen" class="campo-input mt-1">${opciones(ORIGENES, 'empresa')}</select>`) : ''}
             <div class="sm:col-span-2">${campo(`Respaldos (fotos de boleta/factura/transferencia o PDF, hasta ${MAX_ADJUNTOS})`, `<input id="pr-g-archivo" type="file" multiple accept="image/*,application/pdf" class="campo-input mt-1 text-xs">`)}</div>
             <div class="flex items-end"><button type="submit" class="w-full text-sm px-3 py-2.5 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white">Registrar gasto</button></div>
             <p class="sm:col-span-2 lg:col-span-4 text-xs text-slate-500">Queda pendiente hasta que lo apruebe el administrador del proyecto (${h(nombrePerfil(pr.administrador_id))}).</p>
@@ -729,6 +745,9 @@ const Proyectos = (() => {
                 respaldos, agregar,
                 g && x.estado === 'pendiente' ? btn('Aprobar', `Proyectos.revisarGasto('${x.id}','aprobado')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
                 g && x.estado === 'pendiente' ? btn('Rechazar', `Proyectos.pedirRechazo('${x.id}')`, 'border border-red-300 text-red-600 hover:bg-red-50') : '',
+                g && x.origen_fondos === 'propio' && x.estado === 'aprobado' ? (x.reembolsado_en
+                    ? btn('Deshacer reembolso', `Proyectos.reembolsarGasto('${x.id}',false)`, 'border border-slate-300 text-slate-600 hover:bg-slate-50')
+                    : btn('Marcar reembolsado', `Proyectos.reembolsarGasto('${x.id}',true)`, 'bg-violet-600 hover:bg-violet-700 text-white')) : '',
                 g && x.estado !== 'pendiente' ? btn('Reabrir', `Proyectos.revisarGasto('${x.id}','pendiente')`, 'border border-slate-300 text-slate-600 hover:bg-slate-50') : '',
                 (g || (propio && x.estado === 'pendiente')) ? btn('Eliminar', `Proyectos.eliminarGasto('${x.id}')`, 'text-red-500 hover:bg-red-50') : '',
             ].join('');
@@ -738,7 +757,7 @@ const Proyectos = (() => {
                 <td class="px-3 py-2">${h(CATEGORIAS[x.categoria])}${x.subcategoria ? `<span class="block text-xs text-slate-400">${h(x.subcategoria)}</span>` : ''}</td>
                 <td class="px-3 py-2">${h(x.descripcion)}<span class="block text-xs text-slate-400">${h([x.proveedor, TIPOS_DOC[x.tipo_doc] + (x.numero_doc ? ' N° ' + x.numero_doc : '')].filter(Boolean).join(' · '))}</span></td>
                 <td class="px-3 py-2 text-right font-bold whitespace-nowrap">${fmtCLP(x.monto)}</td>
-                <td class="px-3 py-2">${chip(ESTADOS_GASTO[x.estado], COLOR_GASTO[x.estado])}${x.estado === 'rechazado' && x.motivo_rechazo ? `<span class="block text-xs text-red-600 mt-1">${h(x.motivo_rechazo)}</span>` : ''}</td>
+                <td class="px-3 py-2"><div class="flex flex-wrap gap-1">${chip(ESTADOS_GASTO[x.estado], COLOR_GASTO[x.estado])}${x.origen_fondos === 'propio' ? chip(ORIGENES.propio, 'bg-violet-100 text-violet-800') : x.origen_fondos ? chip(ORIGENES.empresa, 'bg-slate-100 text-slate-700') : ''}${x.reembolsado_en ? chip('Reembolsado ' + fecha(x.reembolsado_en), 'bg-emerald-600 text-white') : ''}</div>${x.estado === 'rechazado' && x.motivo_rechazo ? `<span class="block text-xs text-red-600 mt-1">${h(x.motivo_rechazo)}</span>` : ''}</td>
                 <td class="px-3 py-2 text-xs text-slate-500">${h(nombrePerfil(x.registrado_por))}${x.revisado_por ? `<span class="block">Revisó: ${h(nombrePerfil(x.revisado_por))}</span>` : ''}</td>
                 <td class="px-3 py-2"><div class="flex flex-wrap gap-1 justify-end">${acciones}</div></td></tr>${rechazo}`;
         }).join('');
@@ -749,7 +768,134 @@ const Proyectos = (() => {
                 ${filas ? `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[860px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">Fecha</th><th class="px-3 py-2 text-left">Categoría</th><th class="px-3 py-2 text-left">Detalle</th><th class="px-3 py-2 text-right">Monto</th><th class="px-3 py-2 text-left">Estado</th><th class="px-3 py-2 text-left">Registró</th><th class="px-3 py-2"></th></tr></thead><tbody>${filas}</tbody></table></div>`
                     : '<p class="text-sm text-slate-400">No hay gastos con estos filtros.</p>'}
                 <div class="flex flex-wrap gap-4 justify-end text-sm mt-3"><span>Aprobados: <b>${fmtCLP(totalAprob)}</b></span><span>Pendientes: <b>${fmtCLP(totalPend)}</b></span></div>`)}
+            ${porReembolsarHtml(lista)}
         </div>`;
+    }
+    // Gastos pagados con dinero propio, aprobados y aún no devueltos, por persona.
+    function porReembolsarHtml(lista) {
+        const deudas = new Map();
+        lista.filter(x => x.origen_fondos === 'propio' && x.estado === 'aprobado' && !x.reembolsado_en)
+            .forEach(x => deudas.set(x.registrado_por, (deudas.get(x.registrado_por) || 0) + x.monto));
+        if (!deudas.size) return '';
+        return tarjeta('Por reembolsar al personal', `<div class="divide-y divide-slate-100">${[...deudas].map(([id, monto]) =>
+            `<div class="flex justify-between py-2 text-sm"><span>${h(nombrePerfil(id))}</span><b class="text-violet-700">${fmtCLP(monto)}</b></div>`).join('')}</div>
+            <p class="text-xs text-slate-500 mt-2">Gastos aprobados pagados con dinero propio. Al devolver el dinero, usa "Marcar reembolsado" en cada gasto.</p>`);
+    }
+    async function reembolsarGasto(id, marcar) {
+        const x = gastos.find(g => g.id === id);
+        if (!x) return;
+        let fechaReembolso = null;
+        if (marcar) {
+            fechaReembolso = prompt(`Fecha en que se devolvió ${fmtCLP(x.monto)} a ${nombrePerfil(x.registrado_por)} (AAAA-MM-DD):`, hoyChile());
+            if (fechaReembolso == null) return;
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaReembolso.trim())) return toast('Escribe la fecha como AAAA-MM-DD', 'error');
+            fechaReembolso = fechaReembolso.trim();
+        } else if (!confirm('¿Deshacer el reembolso de este gasto?')) return;
+        const data = await ejecutar(supa.from('proyecto_gastos').update({ reembolsado_en: fechaReembolso }).eq('id', id).select().single(),
+            marcar ? 'Reembolso registrado' : 'Reembolso deshecho');
+        if (!data) return;
+        reemplazar(gastos, data);
+        render();
+    }
+
+    // ── Ingresos recibidos en obra (desde la app de terreno o aquí) ──
+    function ingresosHtml(pr) {
+        const g = gestiona(pr), lista = ingresosDe(pr.id);
+        const aprob = lista.filter(x => x.estado === 'aprobado'), pend = lista.filter(x => x.estado === 'pendiente');
+        const filas = lista.map(x => {
+            const acciones = [
+                ...adjuntosDe(x).map((path, i, a) => btn(a.length > 1 ? `Comprobante ${i + 1}` : 'Comprobante', `Proyectos.verArchivo('${h(path)}')`, 'border border-slate-300 text-slate-700 hover:bg-slate-50')),
+                g && x.estado === 'pendiente' ? btn('Autorizar', `Proyectos.revisarIngreso('${x.id}','aprobado')`, 'bg-emerald-600 hover:bg-emerald-700 text-white') : '',
+                g && x.estado === 'pendiente' ? btn('Rechazar', `Proyectos.pedirRechazo('${x.id}')`, 'border border-red-300 text-red-600 hover:bg-red-50') : '',
+                g && x.estado !== 'pendiente' ? btn('Reabrir', `Proyectos.revisarIngreso('${x.id}','pendiente')`, 'border border-slate-300 text-slate-600 hover:bg-slate-50') : '',
+                (g || (x.registrado_por === miPerfil?.id && x.estado === 'pendiente')) ? btn('Eliminar', `Proyectos.eliminarIngreso('${x.id}')`, 'text-red-500 hover:bg-red-50') : '',
+            ].join('');
+            const rechazo = rechazandoId === x.id ? `<tr><td colspan="6" class="px-3 pb-3"><div class="flex flex-wrap gap-2 items-center bg-red-50 rounded-lg p-2"><input id="pr-g-motivo" maxlength="200" placeholder="Motivo del rechazo" class="campo-input flex-1 min-w-[200px]">${btn('Confirmar rechazo', `Proyectos.revisarIngreso('${x.id}','rechazado')`, 'bg-red-600 hover:bg-red-700 text-white')}${btn('Cancelar', 'Proyectos.pedirRechazo(null)', 'text-slate-600 hover:bg-white')}</div></td></tr>` : '';
+            return `<tr class="border-t border-slate-100 align-top">
+                <td class="px-3 py-2 whitespace-nowrap">${fecha(x.fecha)}</td>
+                <td class="px-3 py-2">${h(x.descripcion)}<span class="block text-xs text-slate-400">${h([MEDIOS[x.medio], x.pagador].filter(Boolean).join(' · '))}</span></td>
+                <td class="px-3 py-2 text-right font-bold whitespace-nowrap text-blue-700">${fmtCLP(x.monto)}</td>
+                <td class="px-3 py-2">${chip(x.estado === 'aprobado' ? 'Autorizado' : ESTADOS_GASTO[x.estado], COLOR_GASTO[x.estado])}${x.estado === 'rechazado' && x.motivo_rechazo ? `<span class="block text-xs text-red-600 mt-1">${h(x.motivo_rechazo)}</span>` : ''}</td>
+                <td class="px-3 py-2 text-xs text-slate-500">${h(nombrePerfil(x.registrado_por))}${x.revisado_por ? `<span class="block">Revisó: ${h(nombrePerfil(x.revisado_por))}</span>` : ''}</td>
+                <td class="px-3 py-2"><div class="flex flex-wrap gap-1 justify-end">${acciones}</div></td></tr>${rechazo}`;
+        }).join('');
+        // Dinero de la obra que quedó en manos del personal (transferencia personal o efectivo autorizados).
+        const enPersonal = aprob.filter(x => x.medio !== 'transferencia_empresa').reduce((s, x) => s + x.monto, 0);
+        return tarjeta('Ingresos recibidos en obra', `${filas ? `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[760px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">Fecha</th><th class="px-3 py-2 text-left">Detalle</th><th class="px-3 py-2 text-right">Monto</th><th class="px-3 py-2 text-left">Estado</th><th class="px-3 py-2 text-left">Registró</th><th class="px-3 py-2"></th></tr></thead><tbody>${filas}</tbody></table></div>`
+                : '<p class="text-sm text-slate-400">No hay ingresos registrados. El personal los registra desde la app de terreno (gastos.html).</p>'}
+            <div class="flex flex-wrap gap-4 justify-end text-sm mt-3"><span>Autorizados: <b>${fmtCLP(aprob.reduce((s, x) => s + x.monto, 0))}</b></span><span>Por autorizar: <b>${fmtCLP(pend.reduce((s, x) => s + x.monto, 0))}</b></span>${enPersonal ? `<span>Recibido por el personal: <b>${fmtCLP(enPersonal)}</b></span>` : ''}</div>
+            ${g ? '' : '<p class="text-xs text-slate-500 mt-2">Solo el encargado del proyecto autoriza los ingresos.</p>'}`);
+    }
+    async function revisarIngreso(id, estado) {
+        const cambios = { estado };
+        if (estado === 'rechazado') {
+            cambios.motivo_rechazo = $('pr-g-motivo')?.value.trim() || '';
+            if (cambios.motivo_rechazo.length < 3) return toast('Indica el motivo del rechazo', 'error');
+        }
+        const data = await ejecutar(supa.from('proyecto_ingresos').update(cambios).eq('id', id).select().single(),
+            { aprobado: 'Ingreso autorizado', rechazado: 'Ingreso rechazado', pendiente: 'Ingreso reabierto' }[estado]);
+        if (!data) return;
+        rechazandoId = null;
+        reemplazar(ingresos, data);
+        render();
+    }
+    async function eliminarIngreso(id) {
+        const x = ingresos.find(g => g.id === id);
+        if (!x || !confirm(`¿Eliminar el ingreso "${x.descripcion}" por ${fmtCLP(x.monto)}?`)) return;
+        const ok = await ejecutar(supa.from('proyecto_ingresos').delete().eq('id', id), 'Ingreso eliminado');
+        if (!ok) return;
+        if (adjuntosDe(x).length) supa.storage.from('proyectos').remove(adjuntosDe(x));
+        ingresos = ingresos.filter(g => g.id !== id);
+        render();
+    }
+
+    // ── Informes de trabajo (se crean desde la app de terreno) ──
+    function informesHtml(pr) {
+        const lista = informesDe(pr.id);
+        const filas = lista.map(x => {
+            const fotos = (x.items || []).reduce((s, it) => s + (it.antes?.length || 0) + (it.despues?.length || 0), 0);
+            return `<tr class="border-t border-slate-100 align-top">
+                <td class="px-3 py-2 whitespace-nowrap">${fecha(x.fecha)}</td>
+                <td class="px-3 py-2 font-semibold">${h(x.titulo)}${x.ubicacion ? `<span class="block text-xs text-slate-400 font-normal">${h(x.ubicacion)}</span>` : ''}</td>
+                <td class="px-3 py-2 text-xs text-slate-500">${(x.items || []).length} trabajo(s) · ${fotos} foto(s)</td>
+                <td class="px-3 py-2 text-xs text-slate-500">${h(nombrePerfil(x.registrado_por))}</td>
+                <td class="px-3 py-2"><div class="flex flex-wrap gap-1 justify-end">${btn('Descargar PDF', `Proyectos.pdfInforme('${x.id}',this)`, 'bg-orange-600 hover:bg-orange-700 text-white')}${gestiona(pr) || x.registrado_por === miPerfil?.id ? btn('Eliminar', `Proyectos.eliminarInforme('${x.id}')`, 'text-red-500 hover:bg-red-50') : ''}</div></td></tr>`;
+        }).join('');
+        return tarjeta('Informes de trabajo', `${filas ? `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[700px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">Fecha</th><th class="px-3 py-2 text-left">Informe</th><th class="px-3 py-2 text-left">Contenido</th><th class="px-3 py-2 text-left">Responsable</th><th class="px-3 py-2"></th></tr></thead><tbody>${filas}</tbody></table></div>`
+            : '<p class="text-sm text-slate-400">Aún no hay informes.</p>'}
+            <p class="text-xs text-slate-500 mt-3">Los informes con fotos del antes y del después se crean desde el celular en <a href="gastos.html" target="_blank" class="underline text-blue-700">la app de terreno (gastos.html)</a>.</p>`);
+    }
+    async function pdfInforme(id, boton) {
+        const inf = informes.find(x => x.id === id), pr = inf && proyectos.find(p => p.id === inf.proyecto_id);
+        if (!inf || typeof InformePDF === 'undefined') return;
+        const texto = boton?.textContent, creadas = [];
+        if (boton) { boton.disabled = true; boton.textContent = 'Generando…'; }
+        try {
+            const resultado = await InformePDF.generar({
+                empresa: empresaActual, proyecto: pr, informe: inf, autor: nombrePerfil(inf.registrado_por),
+                cargarFoto: async path => {
+                    const { data, error } = await supa.storage.from('proyectos').download(path);
+                    if (error) throw error;
+                    const u = URL.createObjectURL(data); creadas.push(u); return u;
+                },
+            });
+            InformePDF.descargar(resultado);
+        } catch (error) {
+            toast('No se pudo generar el PDF: ' + (error.message || error), 'error');
+        } finally {
+            creadas.forEach(u => URL.revokeObjectURL(u));
+            if (boton && document.body.contains(boton)) { boton.disabled = false; boton.textContent = texto; }
+        }
+    }
+    async function eliminarInforme(id) {
+        const x = informes.find(g => g.id === id);
+        if (!x || !confirm(`¿Eliminar el informe "${x.titulo}" y sus fotos?`)) return;
+        const ok = await ejecutar(supa.from('proyecto_informes').delete().eq('id', id), 'Informe eliminado');
+        if (!ok) return;
+        const fotos = (x.items || []).flatMap(it => [...(it.antes || []), ...(it.despues || [])]);
+        if (fotos.length) supa.storage.from('proyectos').remove(fotos);
+        informes = informes.filter(g => g.id !== id);
+        render();
     }
     function filtrarGastos(tipo, valor) { if (tipo === 'cat') filtroCat = valor; else filtroEstado = valor; render(); }
     function pedirRechazo(id) { rechazandoId = id; render(); setTimeout(() => $('pr-g-motivo')?.focus(), 20); }
@@ -770,6 +916,7 @@ const Proyectos = (() => {
             subcategoria: $('pr-g-sub').value.trim() || null, descripcion: $('pr-g-desc').value.trim(),
             proveedor: $('pr-g-prov').value.trim() || null, tipo_doc: $('pr-g-tipodoc').value,
             numero_doc: $('pr-g-numdoc').value.trim() || null, monto, adjunto_path: paths[0] || null,
+            ...($('pr-g-origen') ? { origen_fondos: $('pr-g-origen').value } : {}),
         };
         const data = await escribirGasto(conAdj => supa.from('proyecto_gastos').insert(conAdj ? { ...base, adjuntos: paths } : base).select().single(),
             'Gasto registrado, pendiente de aprobación');
@@ -910,7 +1057,7 @@ const Proyectos = (() => {
     function configHtml(pr, p) {
         const g = gestiona(pr), c = pr.config || {}, f = c.firmantes || {};
         const dis = g ? '' : 'disabled';
-        const lista = edpsDe(pr.id), vacio = !lista.length && !gastosDe(pr.id).length
+        const lista = edpsDe(pr.id), vacio = !lista.length && !gastosDe(pr.id).length && !ingresosDe(pr.id).length && !informesDe(pr.id).length
             && !(typeof Compras !== 'undefined' && Compras.deProyecto(pr.id).length);
         const solicitud = lista.find(e => e.tipo === 'anticipo');
         const disAnt = solicitud ? 'disabled' : dis; // lo define la solicitud de anticipo
@@ -938,6 +1085,9 @@ const Proyectos = (() => {
                     <label class="flex items-center gap-2 mt-1.5 text-xs text-slate-600"><input id="pr-c-f-gerencia-ver" type="checkbox" ${f.mostrar_gerencia ? 'checked' : ''} ${dis}> Incluir esta firma en el estado de pago</label></div>
                 ${campo('VºBº Gerente general', `<input id="pr-c-f-general" maxlength="120" class="campo-input mt-1" value="${h(f.gerente_general || '')}" ${dis}>`)}
             </div>
+            ${conTerreno ? `<div><span class="campo-label">Personal asignado (app de terreno)</span>
+                <div class="flex flex-wrap gap-x-5 gap-y-2 mt-1">${perfiles.map(x => `<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="pr-c-asignado" value="${x.id}" ${(pr.asignados || []).includes(x.id) ? 'checked' : ''} ${dis}> ${h(x.nombre || '(sin nombre)')}</label>`).join('')}</div>
+                <p class="text-xs text-slate-500 mt-1">Pueden registrar gastos, ingresos e informes de este proyecto desde el celular en <a href="gastos.html" target="_blank" class="underline text-blue-700">gastos.html</a>. El administrador de la empresa y el del proyecto siempre pueden.</p></div>` : ''}
             ${g ? `<div class="flex flex-wrap gap-2 justify-between">${esAdminEmpresa() && vacio ? btn('Eliminar proyecto', 'Proyectos.eliminarProyecto()', 'border border-red-300 text-red-600 hover:bg-red-50') : '<span></span>'}<button type="submit" class="text-sm px-4 py-2.5 rounded-lg font-bold bg-blue-700 hover:bg-blue-800 text-white">Guardar configuración</button></div>` : '<p class="text-xs text-slate-500">Solo el administrador del proyecto puede modificar la configuración.</p>'}
         </form>`);
     }
@@ -959,6 +1109,7 @@ const Proyectos = (() => {
         const data = await ejecutar(supa.from('proyectos').update({
             nombre: $('pr-c-nombre').value.trim(), codigo: $('pr-c-codigo').value.trim(), estado: $('pr-c-estado').value,
             administrador_id: $('pr-c-admin').value || null, config,
+            ...(conTerreno ? { asignados: [...document.querySelectorAll('.pr-c-asignado:checked')].map(x => x.value) } : {}),
         }).eq('id', pr.id).select().single(), 'Configuración guardada');
         if (!data) return;
         reemplazar(proyectos, data);
@@ -1246,6 +1397,7 @@ const Proyectos = (() => {
         seleccionarEdp, editarAvance, editarDescuento, editarAnticipo, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
         guardarFacturacion, registrarPago, registrarGasto, cambiarCategoriaGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
+        reembolsarGasto, revisarIngreso, eliminarIngreso, pdfInforme, eliminarInforme,
         // Para el módulo de órdenes de compra (compras.js)
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,
         agregarGasto: fila => reemplazar(gastos, fila),

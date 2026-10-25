@@ -11,14 +11,15 @@ function mock(opts){
    {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
   perfiles:[opts.perfil||{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
   presupuestos:opts.presupuestos.map(p=>({id:p.id,empresa_id:a,data:p})),
-  suscripciones:(opts.suscripciones||[]).map(s=>({empresa_id:a,...s})),pagos_suscripcion:[],plataforma_historial:[],cobros_mp:[],proyectos:[],proyecto_edps:[],proyecto_gastos:[],ordenes_compra:[]
+  suscripciones:(opts.suscripciones||[]).map(s=>({empresa_id:a,...s})),pagos_suscripcion:[],plataforma_historial:[],cobros_mp:[],proyectos:opts.proyectos||[],proyecto_edps:[],proyecto_gastos:[],proyecto_ingresos:[],proyecto_informes:[],ordenes_compra:[]
  };
  window.fixture={tables,colaboradores:[],calls:[],uploads:[],state:{estado_acceso:'autorizada',estado_pago:'sin_configurar',operativo:true,vencimiento:null}};
  const hoy=()=>new Date().toISOString().slice(0,10);
  function alta(table,r){
   const base={id:crypto.randomUUID(),creado_en:new Date().toISOString(),...r};
   if(table==='proyecto_edps')Object.assign(base,{numero:tables.proyecto_edps.filter(e=>e.proyecto_id===r.proyecto_id).length+1,estado:'borrador'});
-  if(table==='proyecto_gastos')Object.assign(base,{estado:'pendiente',registrado_por:u});
+  if(table==='proyecto_gastos'||table==='proyecto_ingresos')Object.assign(base,{estado:'pendiente',registrado_por:u});
+  if(table==='proyecto_informes')base.registrado_por=u;
   if(table==='proyectos')base.estado='activo';
   return base;
  }
@@ -43,7 +44,7 @@ function mock(opts){
  window.mockClient={auth:{getSession:async()=>({data:{session:{user:{id:u},access_token:'fixture'}}}),onAuthStateChange(){},signOut:async()=>{}},
   from:query,
   functions:{invoke:async(name,o)=>{window.fixture.calls.push({name,args:o?.body});return name==='mercadopago'?{data:{url:location.origin+'/?mp=aprobado&payment_id=1&status=approved'},error:null}:{data:null,error:null};}},
-  storage:{from:()=>({upload:async(p)=>{window.fixture.uploads.push(p);return{error:null};},createSignedUrl:async()=>({data:{signedUrl:'about:blank'},error:null}),remove:async()=>({error:null})})},
+  storage:{from:()=>({upload:async(p)=>{window.fixture.uploads.push(p);return{error:null};},createSignedUrls:async ps=>({data:ps.map(p=>({path:p,signedUrl:'about:blank'})),error:null}),download:async()=>({data:new Blob(['x'],{type:'image/jpeg'}),error:null}),createSignedUrl:async()=>({data:{signedUrl:'about:blank'},error:null}),remove:async()=>({error:null})})},
   async rpc(name,args) {
    window.fixture.calls.push({name,args});
    if(name==='estado_servicio')return {data:structuredClone(window.fixture.state),error:null};
@@ -82,7 +83,7 @@ const server=http.createServer((req,res)=>{
  if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}
  fs.readFile(file,(error,data)=>{if(error){res.writeHead(404).end();return;}res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');
   // Las librerías externas se reemplazan por dobles de prueba: se quita la verificación de integridad solo aquí.
-  res.end(file.endsWith('index.html')?data.toString().replace(/ integrity="[^"]*" crossorigin="anonymous"/g,''):data);});
+  res.end(file.endsWith('.html')?data.toString().replace(/ integrity="[^"]*" crossorigin="anonymous"/g,''):data);});
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const url='http://127.0.0.1:'+server.address().port;
@@ -93,8 +94,8 @@ try {
  const chrome=process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
  if(fs.existsSync(chrome)) options.executablePath=chrome;
  browser=await chromium.launch(options);
- async function abrirPagina(presupuestos,suscripciones=[],perfil=null){
-  const page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
+ async function abrirPagina(presupuestos,suscripciones=[],perfil=null,extra={}){
+  const page=await browser.newPage({viewport:extra.viewport||{width:1440,height:1000},acceptDownloads:true});
   page.errores=[];
   page.on('pageerror',e=>page.errores.push(e.message));
   page.on('dialog',dialog=>dialog.accept());
@@ -102,8 +103,8 @@ try {
    const u=route.request().url();
    route.fulfill({contentType:'text/javascript',body:u.includes('supabase')?'window.supabase={createClient:()=>window.mockClient};':u.includes('exceljs')?excelJs:''});
   });
-  await page.addInitScript(mock,{presupuestos,suscripciones,perfil});
-  await page.goto(url,{waitUntil:'networkidle'});
+  await page.addInitScript(mock,{presupuestos,suscripciones,perfil,proyectos:extra.proyectos});
+  await page.goto(url+(extra.ruta||''),{waitUntil:'networkidle'});
   return page;
  }
  fs.mkdirSync('tests/artifacts',{recursive:true});
@@ -418,6 +419,61 @@ try {
  await pm.getByText('Pago recibido',{exact:false}).waitFor();
  await pm.waitForFunction(()=>location.search==='' && !document.getElementById('tab-suscripcion').classList.contains('hidden'));
  assert.deepEqual(pm.errores,[]);
- console.log('Navegador: plataforma, ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos) y pago con Mercado Pago correctos en escritorio y móvil. Sin errores JS.');
+
+ // ── App de terreno (gastos.html) en celular: gasto con dinero propio, ingreso por transferencia personal e informe ──
+ const asignado={id:'99999999-9999-4999-8999-999999999999',empresa_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',presupuesto_id:'pre-1',codigo:'CC-101',nombre:'Edificio Las Dalias',estado:'activo',administrador_id:null,asignados:['11111111-1111-4111-8111-111111111111'],config:{}};
+ const ajeno={...asignado,id:'98989898-9898-4989-8989-989898989898',codigo:'CC-999',nombre:'Obra ajena',asignados:[]};
+ const pt=await abrirPagina([],[],{id:'11111111-1111-4111-8111-111111111111',empresa_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',rol:'miembro',nombre:'Técnico'},
+  {ruta:'/gastos.html',viewport:{width:390,height:844},proyectos:[asignado,ajeno]});
+ await pt.locator('.btn-grande').first().waitFor();
+ assert.equal(await pt.locator('.btn-grande').count(),3);
+ await pt.locator('.btn-grande',{hasText:'Gastos'}).click();
+ assert.deepEqual(await pt.locator('#g-proyecto option').allTextContents(),['CC-101 — Edificio Las Dalias'],'Solo los proyectos asignados');
+ await pt.locator('[data-grupo="g-origen"][data-valor="propio"]').click();
+ await pt.locator('#g-monto').fill('15000');
+ assert.equal(await pt.locator('#g-monto').inputValue(),'15.000');
+ await pt.locator('[data-grupo="g-cat"][data-valor="generales"]').click();
+ await pt.locator('#g-desc').fill('Petróleo camioneta');
+ await pt.locator('#form-gasto input[type=file]:not([capture])').setInputFiles({name:'boleta.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4 boleta')});
+ await pt.locator('#gasto-pendientes .miniatura').waitFor();
+ await pt.locator('#g-enviar').click();
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_gastos.length===1);
+ const gt=await pt.evaluate(()=>window.fixture.tables.proyecto_gastos[0]);
+ assert.equal(gt.origen_fondos,'propio'); assert.equal(gt.monto,15000); assert.equal(gt.categoria,'generales'); assert.equal(gt.adjuntos.length,1);
+ assert.match(gt.adjuntos[0],/\/gasto\//);
+ await pt.getByText('Mis gastos').waitFor();
+ assert.ok(await pt.evaluate(()=>document.documentElement.scrollWidth<=390),'Sin scroll horizontal en el celular');
+ await pt.locator('button[aria-label="Volver"]').click();
+ await pt.locator('.btn-grande',{hasText:'Ingresos'}).click();
+ await pt.locator('[data-grupo="i-medio"][data-valor="transferencia_personal"]').click();
+ await pt.getByText('Requiere autorización del encargado').waitFor();
+ await pt.locator('#i-monto').fill('80000');
+ await pt.locator('#i-desc').fill('Adelanto del cliente');
+ await pt.locator('#i-enviar').click(); // sin comprobante: el diálogo de confirmación se acepta
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_ingresos.length===1);
+ assert.equal(await pt.evaluate(()=>window.fixture.tables.proyecto_ingresos[0].medio),'transferencia_personal');
+ await pt.locator('button[aria-label="Volver"]').click();
+ await pt.locator('.btn-grande',{hasText:'Informe'}).click();
+ await pt.getByRole('button',{name:'+ Nuevo informe'}).click();
+ await pt.locator('input[placeholder^="Ej: Remates"]').fill('Remates piso 3');
+ await pt.locator('input[placeholder^="Trabajo"]').fill('Muro living');
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
+ await pt.locator("input[onchange*=antes][multiple]").setInputFiles({name:'antes.png',mimeType:'image/png',buffer:png});
+ await pt.waitForFunction(()=>window.fixture.uploads.some(p=>p.includes('/informe/')));
+ await pt.locator("input[onchange*=despues][multiple]").waitFor({state:'attached'});
+ await pt.locator("input[onchange*=despues][multiple]").setInputFiles({name:'despues.png',mimeType:'image/png',buffer:png});
+ await pt.waitForFunction(()=>window.fixture.uploads.filter(p=>p.includes('/informe/')).length===2);
+ await pt.locator('.miniatura').nth(1).waitFor();
+ await pt.evaluate(()=>{window.hojasPdf=0;window.html2pdf=()=>{const api={set(){return api;},from(){window.hojasPdf++;return api;},toPdf(){return api;},toContainer(){return api;},toCanvas(){return api;},
+  get(){return api;},then(fn){fn({addPage(){}});return api;},output:async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'})};return api;};});
+ await pt.locator('#inf-guardar-pdf').click();
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_informes.length===1 && window.hojasPdf>0);
+ const inf=await pt.evaluate(()=>window.fixture.tables.proyecto_informes[0]);
+ assert.equal(inf.titulo,'Remates piso 3'); assert.equal(inf.items[0].titulo,'Muro living');
+ assert.equal(inf.items[0].antes.length,1); assert.equal(inf.items[0].despues.length,1);
+ await pt.getByText('PDF listo').waitFor();
+ assert.deepEqual(pt.errores,[]);
+ await pt.close();
+ console.log('Navegador: plataforma, ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos), app de terreno (gastos, ingresos, informe) y pago con Mercado Pago correctos en escritorio y móvil. Sin errores JS.');
 } finally { if(browser)await browser.close(); await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
