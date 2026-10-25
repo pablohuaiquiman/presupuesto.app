@@ -1,12 +1,13 @@
 /* Ejecución de proyectos: centro de costo, estados de pago, cobranza y gastos.
    Los permisos reales se validan en Supabase (202610060001_proyectos.sql). */
 const Proyectos = (() => {
-    const CATEGORIAS = { materiales: 'Materiales', mano_obra: 'Mano de obra', generales: 'Gastos generales' };
+    const CATEGORIAS = { materiales: 'Materiales', mano_obra: 'Mano de obra', arriendos: 'Arriendos', generales: 'Gastos generales' };
     // Conceptos sugeridos según la categoría del gasto (el campo admite cualquier texto).
     const SUBCATEGORIAS = {
         materiales: ['Yeso / volcanita', 'Perfiles metálicos', 'Cemento / hormigón', 'Áridos', 'Fierro', 'Madera', 'Pintura', 'Cerámica / porcelanato', 'Material eléctrico', 'Material sanitario', 'Ferretería y fijaciones', 'Adhesivos y selladores', 'Aislación'],
         mano_obra: ['Maestro', 'Ayudante', 'Jornal', 'Trato / a destajo', 'Subcontrato', 'Horas extra', 'Leyes sociales', 'Bono de producción', 'Finiquito'],
-        generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'Arriendo de equipos', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
+        arriendos: ['Arriendo de equipos', 'Andamios', 'Maquinaria', 'Herramientas eléctricas', 'Contenedor / bodega', 'Vehículo / camioneta', 'Baño químico'],
+        generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
     };
     const opcionesConcepto = cat => (SUBCATEGORIAS[cat] || []).map(s => `<option value="${h(s)}">`).join('');
     const ejemploConcepto = cat => 'Ej: ' + (SUBCATEGORIAS[cat] || []).slice(0, 2).join(', ');

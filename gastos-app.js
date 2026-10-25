@@ -7,11 +7,12 @@ const G = (() => {
     const supa = typeof supabase !== 'undefined' ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
     // Mismas listas que proyectos.js (el concepto admite cualquier texto).
-    const CATEGORIAS = { materiales: 'Materiales', mano_obra: 'Mano de obra', generales: 'Gastos generales' };
+    const CATEGORIAS = { materiales: 'Materiales', mano_obra: 'Mano de obra', arriendos: 'Arriendos', generales: 'Gastos generales' };
     const SUBCATEGORIAS = {
         materiales: ['Yeso / volcanita', 'Perfiles metálicos', 'Cemento / hormigón', 'Áridos', 'Fierro', 'Madera', 'Pintura', 'Cerámica / porcelanato', 'Material eléctrico', 'Material sanitario', 'Ferretería y fijaciones', 'Adhesivos y selladores', 'Aislación'],
         mano_obra: ['Maestro', 'Ayudante', 'Jornal', 'Trato / a destajo', 'Subcontrato', 'Horas extra', 'Leyes sociales', 'Bono de producción', 'Finiquito'],
-        generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'Arriendo de equipos', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
+        arriendos: ['Arriendo de equipos', 'Andamios', 'Maquinaria', 'Herramientas eléctricas', 'Contenedor / bodega', 'Vehículo / camioneta', 'Baño químico'],
+        generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
     };
     const TIPOS_DOC = { boleta: 'Boleta', factura: 'Factura', guia: 'Guía de despacho', sin_documento: 'Sin documento' };
     const ORIGENES = { empresa: 'Caja chica', propio: 'Dinero propio' };
@@ -295,6 +296,19 @@ const G = (() => {
         if (lista) lista.innerHTML = (SUBCATEGORIAS[cat] || []).map(s => `<option value="${h(s)}">`).join('');
         if (input) input.placeholder = 'Ej: ' + (SUBCATEGORIAS[cat] || []).slice(0, 2).join(', ');
     }
+    // Dentro de cada proyecto, los gastos se separan por concepto (categoría) con su subtotal.
+    const COLOR_CAT = { materiales: 'text-blue-700', mano_obra: 'text-orange-700', arriendos: 'text-violet-700', generales: 'text-slate-700' };
+    function porConcepto(lista) {
+        return Object.entries(CATEGORIAS).map(([cat, nombre]) => {
+            const del = lista.filter(g => g.categoria === cat);
+            if (!del.length) return '';
+            const total = del.filter(g => g.estado !== 'rechazado').reduce((s, g) => s + g.monto, 0);
+            return `<div><div class="flex justify-between items-baseline px-1 mb-1.5">
+                    <span class="text-xs font-black uppercase tracking-wider ${COLOR_CAT[cat]}">${h(nombre)} <span class="font-semibold text-slate-400 normal-case tracking-normal">· ${del.length}</span></span>
+                    <span class="text-xs font-black ${COLOR_CAT[cat]}">${fmtCLP(total)}</span></div>
+                <div class="space-y-2">${del.map(tarjetaGasto).join('')}</div></div>`;
+        }).join('');
+    }
     function vistaGastos() {
         // "Mis gastos" se filtra por proyecto; los totales de arriba siguen al filtro.
         const idsConGastos = [...new Set(gastos.map(g => g.proyecto_id))];
@@ -327,7 +341,7 @@ const G = (() => {
                     <span class="text-right"><span class="block font-black text-sm">${fmtCLP(total)}</span>
                         <span class="block text-[11px] text-slate-500">${del.length} gasto(s)${pend ? ` · <b class="text-amber-600">${pend} por aprobar</b>` : ''}</span></span>
                 </summary>
-                <div class="space-y-2 mb-3">${del.map(tarjetaGasto).join('')}</div></details>`;
+                <div class="mb-3 pl-2 border-l-2 border-emerald-100 space-y-3">${porConcepto(del)}</div></details>`;
         }).join('');
         // Lista desplegable con el nombre completo de cada proyecto y cuántos gastos tiene.
         const nombreFiltro = id => { const p = proyectoDe(id); return p ? `${p.codigo} — ${p.nombre}${p.estado === 'cerrado' ? ' (cerrado)' : ''}` : 'Proyecto'; };
@@ -354,7 +368,7 @@ const G = (() => {
                 <input id="g-monto" required inputmode="numeric" autocomplete="off" placeholder="0" oninput="G.formatearMonto(this)" class="campo-input text-2xl font-black" value="${v.monto ? v.monto.toLocaleString('es-CL') : ''}"></div>
             <div><label class="campo-label" for="g-fecha">Fecha</label><input id="g-fecha" type="date" required class="campo-input" value="${h(v.fecha || hoyChile())}" max="${hoyChile()}"></div>
             <div><span class="campo-label">Categoría</span><input type="hidden" id="g-cat" value="${cat}">
-                <div class="grid grid-cols-3 gap-2">${opciones('g-cat', CATEGORIAS, cat)}</div></div>
+                <div class="grid grid-cols-2 gap-2">${opciones('g-cat', CATEGORIAS, cat)}</div></div>
             <div><label class="campo-label" for="g-sub">Tipo / concepto</label><input id="g-sub" list="g-subs" maxlength="80" class="campo-input" value="${h(v.subcategoria || '')}"><datalist id="g-subs"></datalist></div>
             <div><label class="campo-label" for="g-desc">Descripción</label><input id="g-desc" required maxlength="300" class="campo-input" placeholder="Qué se compró o pagó" value="${h(v.descripcion || '')}"></div>
             <div><label class="campo-label" for="g-prov">Proveedor</label><input id="g-prov" maxlength="160" class="campo-input" placeholder="Ej: Sodimac, Easy, ferretería" value="${h(v.proveedor || '')}"></div>

@@ -389,6 +389,15 @@ await rejects("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medi
 await as(adp);
 await db.exec(gastoF('Factura tardía','empresa'));
 await db.exec("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion) values('"+pf+"','2026-10-24',1000,'transferencia_empresa','Saldo final')");
+// Categoría "arriendos": antes no existía; la migración mueve los arriendos que estaban en gastos generales.
+const arriendoAntiguo=await value("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,subcategoria,descripcion,monto) values('"+pf+"','2026-10-24','generales','Arriendo de equipos','Andamio',30000) returning id v");
+await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pf+"','2026-10-24','arriendos','Andamio',1000)",/check/);
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610250002_categoria_arriendos.sql','utf8'));
+assert.equal(await value("select categoria v from public.proyecto_gastos where id='"+arriendoAntiguo+"'"),'arriendos');
+await as(adp);
+await db.exec("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pf+"','2026-10-24','arriendos','Andamio',1000)");
+await rejects("insert into public.proyecto_gastos(proyecto_id,fecha,categoria,descripcion,monto) values('"+pf+"','2026-10-24','otros','x',1000)",/check/);
 await db.exec("reset role");
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores y aprobación de órdenes de compra correctos.');

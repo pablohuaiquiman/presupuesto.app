@@ -18,7 +18,8 @@ function json(body: unknown, status = 200) {
 const SUBCATEGORIAS = {
   materiales: ['Yeso / volcanita', 'Perfiles metálicos', 'Cemento / hormigón', 'Áridos', 'Fierro', 'Madera', 'Pintura', 'Cerámica / porcelanato', 'Material eléctrico', 'Material sanitario', 'Ferretería y fijaciones', 'Adhesivos y selladores', 'Aislación'],
   mano_obra: ['Maestro', 'Ayudante', 'Jornal', 'Trato / a destajo', 'Subcontrato', 'Horas extra', 'Leyes sociales', 'Bono de producción', 'Finiquito'],
-  generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'Arriendo de equipos', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
+  arriendos: ['Arriendo de equipos', 'Andamios', 'Maquinaria', 'Herramientas eléctricas', 'Contenedor / bodega', 'Vehículo / camioneta', 'Baño químico'],
+  generales: ['Petróleo', 'Colaciones', 'Peajes', 'Estacionamiento', 'Fletes', 'Movilización', 'Hospedaje', 'Herramientas', 'EPP', 'Retiro de escombros', 'Aseo de obra'],
 };
 
 const texto = { type: ['string', 'null'] };
@@ -35,7 +36,7 @@ const ESQUEMA = {
     rut_proveedor: texto,
     monto_total: { type: ['integer', 'null'] },
     descripcion: texto,
-    categoria: { type: 'string', enum: ['materiales', 'mano_obra', 'generales'] },
+    categoria: { type: 'string', enum: ['materiales', 'mano_obra', 'arriendos', 'generales'] },
     subcategoria: texto,
     observacion: texto,
   },
@@ -51,7 +52,7 @@ const INSTRUCCIONES = `La imagen es la foto de un comprobante de compra chileno 
 - rut_proveedor: RUT del emisor con puntos y guion, por ejemplo 76.123.456-7.
 - monto_total: total pagado en pesos chilenos, como entero sin puntos ni signo (en Chile el punto separa miles: "$ 12.990" es 12990). En facturas es el TOTAL con IVA.
 - descripcion: resumen breve (máximo 80 caracteres) de lo comprado, por ejemplo "Pintura látex y rodillos".
-- categoria: "materiales" si son insumos para la obra, "mano_obra" si es pago de trabajo o servicios de personas, "generales" para combustible, colaciones, peajes, fletes, herramientas, etc.
+- categoria: "materiales" si son insumos para la obra, "mano_obra" si es pago de trabajo o servicios de personas, "arriendos" si es arriendo de equipos, andamios, maquinaria, contenedores o vehículos, "generales" para combustible, colaciones, peajes, fletes, herramientas, etc.
 - subcategoria: el concepto que mejor calce de esta lista según la categoría, o null si ninguno calza: ${JSON.stringify(SUBCATEGORIAS)}
 - observacion: algo que el trabajador deba revisar (por ejemplo "monto parcialmente borroso"), o null.
 
