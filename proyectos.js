@@ -286,11 +286,13 @@ const Proyectos = (() => {
         const cards = ordenados.map(pr => {
             const r = resumen(pr), p = r.p;
             if (!p) return '';
-            return `<button type="button" onclick="Proyectos.abrir('${pr.id}')" class="text-left bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden">
+            return `<button type="button" onclick="Proyectos.abrir('${pr.id}')" class="text-left bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden${pr.estado === 'cerrado' ? ' opacity-75' : ''}">
                 <div class="bg-gradient-to-r from-slate-900 to-slate-700 px-4 py-3">
-                    <p class="text-slate-300 text-xs font-mono">${h(pr.codigo)} · ${h(p.numero)}</p>
+                    <div class="flex items-center justify-between gap-2"><p class="text-slate-300 text-xs font-mono">${h(pr.codigo)} · ${h(p.numero)}</p>${pr.estado === 'cerrado'
+                        ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-800">🔒 CERRADO</span>'
+                        : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-400 text-emerald-950">EN EJECUCIÓN</span>'}</div>
                     <p class="text-white font-bold text-sm mt-0.5 truncate">${h(pr.nombre)}</p>
-                    <p class="text-slate-400 text-xs">${pr.estado === 'cerrado' ? 'Cerrado' : 'En ejecución'} · Adm.: ${h(nombrePerfil(pr.administrador_id))}</p>
+                    <p class="text-slate-400 text-xs">Adm.: ${h(nombrePerfil(pr.administrador_id))}</p>
                 </div>
                 <div class="p-4 space-y-2 text-sm">
                     <div class="flex justify-between"><span class="text-slate-500">Contrato neto</span><span class="font-bold">${fmtM(r.contrato?.sub, p)}</span></div>
@@ -719,7 +721,7 @@ const Proyectos = (() => {
         const totalAprob = filtrados.filter(x => x.estado === 'aprobado').reduce((s, x) => s + x.monto, 0);
         const totalPend = filtrados.filter(x => x.estado === 'pendiente').reduce((s, x) => s + x.monto, 0);
         const opciones = (obj, sel, vacio) => (vacio ? `<option value="">${vacio}</option>` : '') + Object.entries(obj).map(([k, t]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${h(t)}</option>`).join('');
-        const formulario = pr.estado === 'activo' ? tarjeta('Registrar gasto', `<form onsubmit="Proyectos.registrarGasto(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        const formulario = pr.estado === 'activo' || g ? tarjeta(pr.estado === 'activo' ? 'Registrar gasto' : 'Registrar gasto (proyecto cerrado)', `<form onsubmit="Proyectos.registrarGasto(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             ${campo('Fecha', `<input id="pr-g-fecha" type="date" required class="campo-input mt-1" value="${hoyChile()}" max="${hoyChile()}">`)}
             ${campo('Categoría', `<select id="pr-g-cat" required onchange="Proyectos.cambiarCategoriaGasto(this.value)" class="campo-input mt-1">${opciones(CATEGORIAS, 'materiales')}</select>`)}
             ${campo('Tipo / concepto', `<input id="pr-g-sub" list="pr-g-subs" maxlength="80" placeholder="${h(ejemploConcepto('materiales'))}" class="campo-input mt-1"><datalist id="pr-g-subs">${opcionesConcepto('materiales')}</datalist>`)}
@@ -731,7 +733,7 @@ const Proyectos = (() => {
             ${conTerreno ? campo('Pagado con', `<select id="pr-g-origen" class="campo-input mt-1">${opciones(ORIGENES, 'empresa')}</select>`) : ''}
             <div class="sm:col-span-2">${campo(`Respaldos (fotos de boleta/factura/transferencia o PDF, hasta ${MAX_ADJUNTOS})`, `<input id="pr-g-archivo" type="file" multiple accept="image/*,application/pdf" class="campo-input mt-1 text-xs">`)}</div>
             <div class="flex items-end"><button type="submit" class="w-full text-sm px-3 py-2.5 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-700 text-white">Registrar gasto</button></div>
-            <p class="sm:col-span-2 lg:col-span-4 text-xs text-slate-500">Queda pendiente hasta que lo apruebe el administrador del proyecto (${h(nombrePerfil(pr.administrador_id))}).</p>
+            <p class="sm:col-span-2 lg:col-span-4 text-xs text-slate-500">${pr.estado === 'activo' ? '' : '<b class="text-slate-700">Proyecto cerrado:</b> solo su administrador puede cargarle gastos. '}Queda pendiente hasta que lo apruebe el administrador del proyecto (${h(nombrePerfil(pr.administrador_id))}).</p>
         </form>`) : '';
         const filas = filtrados.map(x => {
             const propio = x.registrado_por === miPerfil?.id;
@@ -739,7 +741,7 @@ const Proyectos = (() => {
             const adj = adjuntosDe(x);
             const respaldos = adj.map((path, i) => `<span class="inline-flex items-stretch">${btn(adj.length > 1 ? `Respaldo ${i + 1}` : 'Respaldo', `Proyectos.verArchivo('${h(path)}')`, `border border-slate-300 text-slate-700 hover:bg-slate-50${editable ? ' rounded-r-none' : ''}`)}${editable
                 ? `<button type="button" title="Quitar este respaldo" onclick="Proyectos.quitarRespaldo('${x.id}',${i})" class="text-xs px-2 rounded-r-lg border border-l-0 border-slate-300 text-slate-400 hover:text-red-600 hover:bg-red-50">×</button>` : ''}</span>`).join('');
-            const agregar = editable && pr.estado === 'activo' && adj.length < MAX_ADJUNTOS
+            const agregar = editable && (pr.estado === 'activo' || g) && adj.length < MAX_ADJUNTOS
                 ? `<label class="text-xs px-3 py-2 rounded-lg font-bold transition-colors border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer">+ Respaldo<input type="file" multiple accept="image/*,application/pdf" class="hidden" onchange="Proyectos.agregarRespaldos('${x.id}',this)"></label>` : '';
             const acciones = [
                 respaldos, agregar,

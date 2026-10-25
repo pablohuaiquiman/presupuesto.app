@@ -116,7 +116,7 @@ const G = (() => {
         perfil = p;
         const [em, pr, pe, ga, ing, inf] = await Promise.all([
             supa.from('empresas').select('id,nombre_comercial,razon_social,rut,direccion,logo_b64').eq('id', p.empresa_id).maybeSingle(),
-            supa.from('proyectos').select('*').eq('estado', 'activo').order('creado_en'),
+            supa.from('proyectos').select('*').order('creado_en'),
             supa.from('perfiles').select('id,nombre').eq('empresa_id', p.empresa_id),
             supa.from('proyecto_gastos').select('*').eq('registrado_por', usuario.id).order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(200),
             supa.from('proyecto_ingresos').select('*').eq('registrado_por', usuario.id).order('fecha', { ascending: false }).order('creado_en', { ascending: false }).limit(200),
@@ -126,8 +126,10 @@ const G = (() => {
         if (fallo) toast('Algunos datos no se pudieron cargar: ' + fallo.error.message, 'error');
         empresa = em.data;
         perfiles = pe.data || [];
-        // El técnico ve los proyectos que tiene asignados; el administrador, todos.
-        proyectos = (pr.data || []).filter(x => gestiona(x) || (x.asignados || []).includes(usuario.id));
+        // El técnico ve los proyectos activos que tiene asignados. Quien administra ve todos, también los cerrados
+        // (puede cargarles gastos e ingresos que llegan después del cierre); los cerrados van al final.
+        proyectos = (pr.data || []).filter(x => gestiona(x) || (x.estado === 'activo' && (x.asignados || []).includes(usuario.id)))
+            .sort((a, b) => (a.estado === b.estado ? 0 : a.estado === 'activo' ? -1 : 1));
         gastos = ga.data || []; ingresos = ing.data || [];
         informes = (inf.data || []).filter(x => proyectoDe(x.proyecto_id) || x.registrado_por === usuario.id);
         ir(pantalla === 'informe' ? 'informes' : pantalla);
@@ -165,7 +167,7 @@ const G = (() => {
         const sel = valor || recordado('proyecto');
         return `<div><label class="campo-label" for="${id}">Proyecto</label><select id="${id}" required class="campo-input" onchange="G.recordarProyecto(this.value)">
             ${proyectos.length > 1 ? '<option value="">Elige el proyecto…</option>' : ''}
-            ${proyectos.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${h(p.codigo)} — ${h(p.nombre)}</option>`).join('')}</select></div>`;
+            ${proyectos.map(p => `<option value="${p.id}" ${p.id === sel ? 'selected' : ''}>${p.estado === 'cerrado' ? '🔒 ' : ''}${h(p.codigo)} — ${h(p.nombre)}${p.estado === 'cerrado' ? ' (cerrado)' : ''}</option>`).join('')}</select></div>`;
     }
     const opciones = (grupo, items, activo) => Object.entries(items).map(([k, v]) => {
         const [titulo, sub] = Array.isArray(v) ? v : [v, ''];

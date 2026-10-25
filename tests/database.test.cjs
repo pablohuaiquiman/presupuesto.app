@@ -377,6 +377,18 @@ assert.equal(await value("select titulo v from public.proyecto_informes where id
 await as(adp);
 await db.exec("update public.proyecto_informes set titulo='Revisado' where id='"+inf+"'");
 assert.equal(await value("select titulo||registrado_por::text v from public.proyecto_informes where id='"+inf+"'"),'Revisado'+trab);
+// Proyecto cerrado: su administrador aún carga gastos e ingresos tardíos; el personal asignado no.
+await db.exec("update public.proyectos set estado='cerrado' where id='"+pf+"'");
+await as(trab);
+await rejects(gastoF('Factura tardía','empresa'),/no permitido|cerrado/);
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610250001_cerrados_admin.sql','utf8'));
+await as(trab);
+await rejects(gastoF('Factura tardía','empresa'),/solo su administrador registra gastos/);
+await rejects("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion) values('"+pf+"','2026-10-24',1000,'efectivo','x')",/solo su administrador registra ingresos/);
+await as(adp);
+await db.exec(gastoF('Factura tardía','empresa'));
+await db.exec("insert into public.proyecto_ingresos(proyecto_id,fecha,monto,medio,descripcion) values('"+pf+"','2026-10-24',1000,'transferencia_empresa','Saldo final')");
 await db.exec("reset role");
 await db.close();
 console.log('Migraciones ejecutadas en PostgreSQL temporal: plataforma (permisos, deuda, pagos, bloqueo) proyectos (estados de pago, gastos, archivos, aislamiento) seguridad (alta con sesión, firma acotada), colaboradores y aprobación de órdenes de compra correctos.');
