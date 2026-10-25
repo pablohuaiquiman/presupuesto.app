@@ -327,8 +327,13 @@ const G = (() => {
                 </summary>
                 <div class="space-y-2 mb-3">${del.map(tarjetaGasto).join('')}</div></details>`;
         }).join('');
-        const filtros = idsConGastos.length > 1 ? `<div class="flex gap-2 overflow-x-auto pb-2 mb-1 -mx-4 px-4">${[['', 'Todos'], ...idsConGastos.map(id => [id, proyectoDe(id)?.codigo || 'Proyecto'])].map(([id, t]) =>
-            `<button type="button" onclick="G.filtrarGastos('${id}')" class="shrink-0 text-xs font-bold px-3 py-2 rounded-full border ${filtroGastos === id ? 'bg-emerald-700 border-emerald-700 text-white' : 'bg-white border-slate-300 text-slate-700'}">${h(t)}</button>`).join('')}</div>` : '';
+        // Lista desplegable con el nombre completo de cada proyecto y cuántos gastos tiene.
+        const nombreFiltro = id => { const p = proyectoDe(id); return p ? `${p.codigo} — ${p.nombre}${p.estado === 'cerrado' ? ' (cerrado)' : ''}` : 'Proyecto'; };
+        const filtros = idsConGastos.length > 1 ? `<label class="block mb-3"><span class="campo-label">Ver gastos de</span>
+            <select id="filtro-gastos" onchange="G.filtrarGastos(this.value)" class="campo-input font-semibold">
+                <option value="">Todos los proyectos (${gastos.length})</option>
+                ${idsConGastos.map(id => `<option value="${id}" ${filtroGastos === id ? 'selected' : ''}>${h(nombreFiltro(id))} (${gastos.filter(g => g.proyecto_id === id).length})</option>`).join('')}
+            </select></label>` : '';
         const tarjetas = grupos;
         return `${cabecera('Gastos', 'bg-emerald-700')}<main class="p-4 space-y-4 safe-bottom">${formulario}
             <section id="mis-gastos"><h2 class="font-black text-lg mb-2">Mis gastos</h2>${filtros}
