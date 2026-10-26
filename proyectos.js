@@ -1175,6 +1175,11 @@ const Proyectos = (() => {
             .map(x => x.id === e.id ? { ...x, totales: calc.totales } : x);
         return { e, pr, p, items: calc.items, t: calc.totales, historial, emp: empresaActual || {} };
     }
+    // Datos para transferencia de Mi Empresa (empresas.datos_bancarios), solo los que tienen valor.
+    const datosTransferencia = emp => {
+        const b = emp.datos_bancarios || {};
+        return [['Titular', b.titular], ['RUT', b.rut], ['Banco', b.nombre], ['Tipo de cuenta', b.tipo], ['N° de cuenta', b.numero], ['Correo', b.email]].filter(([, v]) => v);
+    };
     function nombreArchivo(d, ext) {
         const limpio = s => String(s || '').replace(/[\\/:*?"<>|]/g, '').trim();
         return `EEPP N°${String(d.e.numero).padStart(2, '0')} ${limpio(d.pr.codigo)} ${limpio(d.pr.nombre)}`.slice(0, 120) + '.' + ext;
@@ -1313,6 +1318,16 @@ const Proyectos = (() => {
         }
         ws.mergeCells(`I${fila}:L${fila}`); set(`I${fila}`, 'A Pagar $', { font: { bold: true, size: 12 }, alignment: { horizontal: 'right' } });
         formula(`M${fila}`, t.documento === 'exenta' ? `M${rFac}` : `M${rFac}${t.documento === 'boleta_honorarios' ? '-' : '+'}M${fila - 1}`, t.aPagar).font = { bold: true, size: 12 };
+        // Datos para transferencia a la izquierda de los totales.
+        const banco = datosTransferencia(emp);
+        if (banco.length) {
+            ws.mergeCells(`A${rFac}:F${rFac}`); set(`A${rFac}`, 'DATOS PARA TRANSFERENCIA', { font: { bold: true }, fill: gris });
+            banco.forEach(([k, v], n) => {
+                const r = rFac + 1 + n;
+                set(`A${r}`, k + ' :', { font: { bold: true } }); ws.mergeCells(`B${r}:F${r}`); set(`B${r}`, v);
+            });
+            fila = Math.max(fila, rFac + banco.length);
+        }
         fila += 4;
 
         const f = pr.config?.firmantes || {};
@@ -1388,7 +1403,8 @@ const Proyectos = (() => {
             lin('Costo directo', 'cd') + (conGG ? lin(`Gastos generales ${t.ggPct}%`, 'gg') + lin(`Utilidad ${t.utilPct}%`, 'util') : '') + lin('Subtotal neto', 'sub', 'b') + lin('Descuento anticipo', 'anticipo') + lin(`Retención ${t.retPct}%`, 'retencion')
             + (t.acum?.descuento ? lin(`Descuento mandante${t.descuentoMotivo ? ` (${h(t.descuentoMotivo)})` : ''}`, 'descuento') : '') + lin('Total neto', 'neto', 'b');
         const f = pr.config?.firmantes || {};
-        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:24px;text-align:center}.edp .firmas .caja{width:30%}.edp .firmas .linea{border-top:1px solid #0f172a;padding-top:4px}.edp .firmas .firma-img{display:block;height:60px;max-width:100%;margin:0 auto 2px;object-fit:contain}.edp .firmas.dos{justify-content:space-around}.edp .firmas.dos .caja{width:34%}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}`;
+        const css = `.edp{font-family:Arial,sans-serif;color:#0f172a;padding:28px;font-size:10px;box-sizing:border-box;width:max-content;min-width:100%}.edp *{box-sizing:border-box}.edp td.r,.edp th{white-space:nowrap}.edp h1{font-size:16px;margin:0}.edp .titulo{background:#1e293b;color:#fff;border-radius:6px;padding:10px 14px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center;gap:16px}.edp .titulo h1{font-size:18px;letter-spacing:.5px}.edp .titulo span{font-size:11px;color:#cbd5e1}.edp table{width:100%;border-collapse:collapse;margin-top:10px}.edp td,.edp th{border:1px solid #cbd5e1;padding:3px 5px}.edp th{background:#1e293b;color:#fff;font-size:9px}.edp .r{text-align:right}.edp .c{text-align:center}.edp .b{font-weight:bold}.edp .cap td{background:#e2e8f0;font-weight:bold}.edp .top{display:flex;justify-content:space-between;gap:16px}.edp .firmas{display:flex;justify-content:space-between;margin-top:24px;text-align:center}.edp .firmas .caja{width:30%}.edp .firmas .linea{border-top:1px solid #0f172a;padding-top:4px}.edp .firmas .firma-img{display:block;height:60px;max-width:100%;margin:0 auto 2px;object-fit:contain}.edp .firmas.dos{justify-content:space-around}.edp .firmas.dos .caja{width:34%}.edp .pagar{background:#0f172a;color:#fff;font-size:13px}.edp .pie{display:flex;gap:16px;align-items:flex-start;margin-top:10px}.edp .pie .totales{width:45%;margin:0 0 0 auto}.edp .banco{flex:1;max-width:50%;border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;line-height:1.5}.edp .banco p{margin:0 0 4px;font-weight:bold;font-size:10px;letter-spacing:.5px;color:#1e293b}.edp .banco span{display:inline-block;min-width:88px;color:#475569}`;
+        const banco = datosTransferencia(emp);
         const totalEdps = edpsDe(pr.id).length;
         // Firma registrada sobre la línea; nunca en borrador ni la del cliente (la pone el mandante).
         const caja = (titulo, nombre, propia = true) => {
@@ -1402,7 +1418,8 @@ const Proyectos = (() => {
             <div style="text-align:right"><div><b>Centro de costo:</b> ${h(pr.codigo)}</div><div><b>Obra:</b> ${h(pr.nombre)}</div><div><b>Mandante:</b> ${h(p.cliente.nombre)}</div><div><b>OC:</b> ${h(e.oc_numero || pr.config?.oc_numero || 'pendiente')} · <b>HES:</b> ${h(e.hes_numero || '—')}</div><div><b>Fecha presentación:</b> ${fecha(e.fecha_presentacion || hoyChile())}</div></div></div>
             ${items.length ? `<table><thead><tr><th>Detalle</th><th>Un</th><th>Cant.</th><th>P. unitario</th><th>Precio total</th><th>Avance un</th><th>Avance %</th><th>EP actual</th><th>Total a pago</th></tr></thead><tbody>${filas}</tbody></table>` : ''}
             <table><thead><tr><th></th><th>Contrato</th><th>Acumulado</th><th>Anterior</th><th>Este EP</th></tr></thead><tbody>${resumenFilas}</tbody></table>
-            <table style="width:45%;margin-left:auto"><tbody><tr><td>Neto este EP</td><td class="r">${M(t.per.neto)}</td></tr>${t.documento === 'exenta' ? '' : `<tr><td>${t.documento === 'boleta_honorarios' ? 'Retención boleta' : 'IVA'} ${t.tasa}%</td><td class="r">${M(t.impuesto)}</td></tr>`}<tr class="pagar b"><td>A PAGAR</td><td class="r">${M(t.aPagar)}</td></tr></tbody></table>
+            <div class="pie">${banco.length ? `<div class="banco"><p>DATOS PARA TRANSFERENCIA</p>${banco.map(([k, v]) => `<div><span>${k}:</span> <b>${h(v)}</b></div>`).join('')}</div>` : ''}
+            <table class="totales"><tbody><tr><td>Neto este EP</td><td class="r">${M(t.per.neto)}</td></tr>${t.documento === 'exenta' ? '' : `<tr><td>${t.documento === 'boleta_honorarios' ? 'Retención boleta' : 'IVA'} ${t.tasa}%</td><td class="r">${M(t.impuesto)}</td></tr>`}<tr class="pagar b"><td>A PAGAR</td><td class="r">${M(t.aPagar)}</td></tr></tbody></table></div>
             <div class="firmas${f.mostrar_gerencia ? '' : ' dos'}">${caja('VºBº Cliente', f.cliente, false)}${f.mostrar_gerencia ? caja('VºBº Gerencia de proyecto', f.gerencia_proyecto) : ''}${caja('VºBº Gerente General', f.gerente_general)}</div></div>`;
         generarPDF(css, html, nombreArchivo(d, 'pdf'));
     }

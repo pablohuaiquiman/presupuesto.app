@@ -7,7 +7,7 @@ process.chdir(path.resolve(__dirname,'..'));
 function mock(opts){
  const a='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',b='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',u='11111111-1111-4111-8111-111111111111';
  const tables={
-  empresas:[{id:a,nombre_comercial:'Constructora PHH',razon_social:'CONSTRUCTORA E INSTALACIONES PHH SPA',rut:'77234145-8',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:3,perfiles:[{count:1}]},
+  empresas:[{id:a,nombre_comercial:'Constructora PHH',razon_social:'CONSTRUCTORA E INSTALACIONES PHH SPA',rut:'77234145-8',datos_bancarios:{titular:'Constructora E Instalaciones Phh Spa',rut:'77.234.145-8',nombre:'Banco Bci',tipo:'Cuenta corriente en pesos',numero:'29054401'},aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:3,perfiles:[{count:1}]},
    {id:b,nombre_comercial:'Empresa de prueba <segura>',email_contacto:'cliente@example.test',aprobada:true,acceso_transitorio:true,estado_acceso:'autorizada',limite_usuarios:2,perfiles:[{count:1}]}],
   perfiles:[opts.perfil||{id:u,empresa_id:a,rol:'admin',es_superadmin:true,nombre:'Administrador'}],
   presupuestos:opts.presupuestos.map(p=>({id:p.id,empresa_id:a,data:p})),
@@ -240,19 +240,26 @@ try {
  assert.equal(ws.getCell('M'+aPagar.row).value.result,1984028);
  assert.ok(celdas.some(c=>c.value?.formula?.startsWith('IF(AND(F')),'Faltan fórmulas de avance');
  assert.ok(celdas.some(c=>c.value==='F-1234'),'Falta la factura en el historial');
+ assert.ok(celdas.some(c=>c.value==='DATOS PARA TRANSFERENCIA')&&celdas.some(c=>c.value==='29054401'),'Faltan los datos para transferencia en el Excel');
  assert.ok(celdas.some(c=>c.value==='VºBº Gerente General')&&!celdas.some(c=>c.value==='VºBº Gerencia de proyecto'),'El Excel no debe traer la firma de gerencia de proyecto por defecto');
  // PDF del EP: título con N° correlativo y hoja tan ancha como el contenido (nada cortado)
  const pdf=await pp.evaluate(async()=>{
   let opciones,ancho,texto,desborde;
   const lienzo=document.createElement('canvas');lienzo.width=20;lienzo.height=20;
-  window.html2pdf=()=>{const api={set(o){opciones=o;return api;},from(el){ancho=el.getBoundingClientRect().width;texto=el.innerText;desborde=[...el.querySelectorAll('*')].some(x=>x.getBoundingClientRect().right>el.getBoundingClientRect().right+1);return api;},
+  window.html2pdf=()=>{const api={set(o){opciones=o;return api;},from(el){ancho=el.getBoundingClientRect().width;texto=el.innerText;desborde=[...el.querySelectorAll('*')].some(x=>x.getBoundingClientRect().right>el.getBoundingClientRect().right+1);
+    const v=el.cloneNode(true),st=document.createElement('style');v.id='edp-vista';v.style.cssText='position:absolute;top:0;left:0;z-index:99999;background:#fff;width:'+ancho+'px';
+    st.textContent=document.head.lastElementChild.textContent;v.prepend(st);document.body.appendChild(v);return api;},
    toCanvas(){return api;},get:async()=>lienzo,toPdf(){return api;},output:async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'})};return api;};
   Proyectos.exportarPDF(window.fixture.tables.proyecto_edps[0].id);
   await new Promise(r=>setTimeout(r,100));
   return {formato:opciones.jsPDF.format,orientacion:opciones.jsPDF.orientation,ancho,texto,desborde};
  });
+ await pp.locator('#edp-vista').screenshot({path:'tests/artifacts/estado-de-pago-pdf.png'});
+ await pp.evaluate(()=>document.getElementById('edp-vista').remove());
  assert.match(pdf.texto,/ESTADO DE PAGO Nº 01/);
  assert.match(pdf.texto,/Correlativo Nº 1 de 1 del proyecto/);
+ assert.match(pdf.texto,/DATOS PARA TRANSFERENCIA[\s\S]*Banco Bci[\s\S]*29054401/);
+ assert.doesNotMatch(pdf.texto,/Correo:/,'Sin correo bancario no se imprime la línea');
  // Por defecto solo firman el cliente y el gerente general
  assert.match(pdf.texto,/VºBº Cliente/);
  assert.match(pdf.texto,/VºBº Gerente General/);

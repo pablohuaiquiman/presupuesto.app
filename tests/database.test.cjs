@@ -181,6 +181,17 @@ await as(obrero);
 await db.exec("update public.empresas set firmas='[]' where id='"+d+"'");
 await as(jefe);
 assert.equal(await value("select jsonb_array_length(firmas) v from public.empresas where id='"+d+"'"),1);
+// Datos para transferencia: los guarda el administrador, no el miembro.
+await db.exec("reset role");
+await db.exec(fs.readFileSync('supabase/migrations/202610260001_datos_bancarios.sql','utf8'));
+await as(jefe);
+await db.exec("update public.empresas set datos_bancarios='{\"banco\":\"Banco Bci\",\"numero\":\"29054401\"}' where id='"+d+"'");
+assert.equal(await value("select datos_bancarios->>'numero' v from public.empresas where id='"+d+"'"),'29054401');
+await rejects("update public.empresas set datos_bancarios='[]' where id='"+d+"'",/check/);
+await as(obrero);
+await db.exec("update public.empresas set datos_bancarios='{}' where id='"+d+"'");
+await as(jefe);
+assert.equal(await value("select datos_bancarios->>'banco' v from public.empresas where id='"+d+"'"),'Banco Bci');
 // Archivos por carpeta de empresa.
 await as(jefe);
 await db.exec("insert into storage.objects(bucket_id,name) values('proyectos','"+d+"/"+pid2+"/gasto/a.jpg')");

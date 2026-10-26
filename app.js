@@ -307,6 +307,8 @@ function empresaInfoLineaHtml() {
 
 // undefined = sin cambios al logo; null = se quitó; string = logo nuevo (dataURL)
 let logoB64Pendiente;
+// Datos para transferencia (empresas.datos_bancarios), en el orden en que se imprimen en el estado de pago.
+const CAMPOS_BANCO = ['titular', 'rut', 'nombre', 'tipo', 'numero', 'email'];
 
 function cargarFormularioEmpresa() {
     const e = empresaActual || {};
@@ -318,6 +320,8 @@ function cargarFormularioEmpresa() {
     document.getElementById('emp-email').value = e.email_contacto || '';
     document.getElementById('emp-responsable-nombre').value = e.responsable_nombre || '';
     document.getElementById('emp-responsable-cargo').value = e.responsable_cargo || '';
+    const b = e.datos_bancarios || {};
+    CAMPOS_BANCO.forEach(k => { document.getElementById('emp-banco-' + k).value = b[k] || ''; });
     logoB64Pendiente = undefined;
     document.getElementById('emp-logo-file').value = '';
     mostrarPreviewLogo(e.logo_b64 || null);
@@ -387,6 +391,7 @@ async function onSubmitEmpresa(e) {
         responsable_nombre: document.getElementById('emp-responsable-nombre').value.trim(),
         responsable_cargo: document.getElementById('emp-responsable-cargo').value.trim(),
         logo_b64: logoB64Pendiente !== undefined ? logoB64Pendiente : (empresaActual.logo_b64 || null),
+        datos_bancarios: Object.fromEntries(CAMPOS_BANCO.map(k => [k, document.getElementById('emp-banco-' + k).value.trim()]).filter(([, v]) => v)),
     };
     const { error } = await supa.from('empresas').update(datos).eq('id', empresaActual.id);
     if (error) return toast('No se pudo guardar: ' + error.message, 'error');

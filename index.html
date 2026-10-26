@@ -767,6 +767,35 @@
                     <label class="text-xs font-semibold text-slate-500">Cargo del responsable</label>
                     <input id="emp-responsable-cargo" class="campo-input w-full">
                 </div>
+                <div class="sm:col-span-2 pt-3 border-t border-slate-100">
+                    <p class="text-sm font-bold text-slate-700">Datos para transferencia</p>
+                    <p class="text-xs text-slate-500">Se imprimen en los estados de pago. Deja vacío lo que no quieras mostrar.</p>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Titular de la cuenta</label>
+                    <input id="emp-banco-titular" maxlength="160" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">RUT del titular</label>
+                    <input id="emp-banco-rut" maxlength="20" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Banco</label>
+                    <input id="emp-banco-nombre" maxlength="80" class="campo-input w-full" placeholder="Ej: Banco Bci">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Tipo de cuenta</label>
+                    <input id="emp-banco-tipo" maxlength="80" list="emp-banco-tipos" class="campo-input w-full" placeholder="Ej: Cuenta corriente">
+                    <datalist id="emp-banco-tipos"><option value="Cuenta corriente"><option value="Cuenta vista"><option value="Cuenta RUT"><option value="Cuenta de ahorro"></datalist>
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Número de cuenta</label>
+                    <input id="emp-banco-numero" maxlength="40" class="campo-input w-full">
+                </div>
+                <div>
+                    <label class="text-xs font-semibold text-slate-500">Correo para aviso de pago</label>
+                    <input id="emp-banco-email" type="email" maxlength="160" class="campo-input w-full">
+                </div>
                 <div class="sm:col-span-2">
                     <button type="submit" class="bg-blue-700 hover:bg-blue-800 text-white font-bold py-2.5 px-6 rounded-lg transition-colors">Guardar datos</button>
                 </div>
@@ -1095,10 +1124,10 @@
 
 <dialog id="pl-dialog" class="pl-dialog pl-platform" aria-labelledby="pl-dialog-title"><button class="pl-button pl-dialog-close" onclick="document.getElementById('pl-dialog').close()">Cerrar ficha</button><div id="pl-detail"></div></dialog>
 <script src="data.js?v=20261007a"></script>
-<script src="app.js?v=20261021a"></script>
+<script src="app.js?v=20261026a"></script>
 <script src="platform.js?v=20261019a"></script>
 <script src="informe-pdf.js?v=20261025b"></script>
-<script src="proyectos.js?v=20261026a"></script>
+<script src="proyectos.js?v=20261026b"></script>
 <script src="compras.js?v=20261021a"></script>
 </body>
 </html>
