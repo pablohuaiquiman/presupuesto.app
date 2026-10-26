@@ -875,7 +875,7 @@ const Proyectos = (() => {
                 <td class="px-3 py-2 font-semibold">${h(x.titulo)}${x.ubicacion ? `<span class="block text-xs text-slate-400 font-normal">${h(x.ubicacion)}</span>` : ''}</td>
                 <td class="px-3 py-2 text-xs text-slate-500">${(x.items || []).length} trabajo(s) · ${fotos} foto(s)</td>
                 <td class="px-3 py-2 text-xs text-slate-500">${h(nombrePerfil(x.registrado_por))}</td>
-                <td class="px-3 py-2"><div class="flex flex-wrap gap-1 justify-end">${btn('Descargar PDF', `Proyectos.pdfInforme('${x.id}',this)`, 'bg-orange-600 hover:bg-orange-700 text-white')}${gestiona(pr) || x.registrado_por === miPerfil?.id ? btn('Eliminar', `Proyectos.eliminarInforme('${x.id}')`, 'text-red-500 hover:bg-red-50') : ''}</div></td></tr>`;
+                <td class="px-3 py-2"><div class="flex flex-wrap gap-1 justify-end">${btn('Descargar PDF', `Proyectos.pdfInforme('${x.id}',this)`, 'bg-orange-600 hover:bg-orange-700 text-white')}${gestiona(pr) || x.registrado_por === miPerfil?.id ? btn('Editar', `Proyectos.editarInforme('${x.id}')`, 'border border-slate-300 text-slate-700 hover:bg-slate-50') + btn('Eliminar', `Proyectos.eliminarInforme('${x.id}')`, 'text-red-500 hover:bg-red-50') : ''}</div></td></tr>`;
         }).join('');
         return tarjeta('Informes de trabajo', `${filas ? `<div class="overflow-x-auto"><table class="w-full text-sm min-w-[700px]"><thead class="text-xs text-slate-500 uppercase bg-slate-50"><tr><th class="px-3 py-2 text-left">Fecha</th><th class="px-3 py-2 text-left">Informe</th><th class="px-3 py-2 text-left">Contenido</th><th class="px-3 py-2 text-left">Responsable</th><th class="px-3 py-2"></th></tr></thead><tbody>${filas}</tbody></table></div>`
             : '<p class="text-sm text-slate-400">Aún no hay informes.</p>'}
@@ -902,6 +902,20 @@ const Proyectos = (() => {
             creadas.forEach(u => URL.revokeObjectURL(u));
             if (boton && document.body.contains(boton)) { boton.disabled = false; boton.textContent = texto; }
         }
+    }
+    // El informe se edita en la app de terreno (fotos, bloques antes/después); al volver a esta pestaña se recargan.
+    let esperandoInforme = false;
+    function editarInforme(id) {
+        window.open('gastos.html?informe=' + encodeURIComponent(id), '_blank');
+        if (esperandoInforme) return;
+        esperandoInforme = true;
+        window.addEventListener('focus', async () => {
+            esperandoInforme = false;
+            const { data, error } = await supa.from('proyecto_informes').select('*').order('fecha', { ascending: false });
+            if (error) return;
+            informes = data || [];
+            if (vista === 'informes') render();
+        }, { once: true });
     }
     async function eliminarInforme(id) {
         const x = informes.find(g => g.id === id);
@@ -1413,7 +1427,7 @@ const Proyectos = (() => {
         seleccionarEdp, editarAvance, editarDescuento, editarAnticipo, refrescarEdp, nuevoEdp, guardarEdp, cambiarEstado, aprobarEdp, eliminarEdp,
         guardarFacturacion, registrarPago, registrarGasto, cambiarCategoriaGasto, agregarRespaldos, quitarRespaldo, revisarGasto, pedirRechazo, eliminarGasto, filtrarGastos,
         guardarConfig, eliminarProyecto, verArchivo, exportarExcel, exportarPDF,
-        reembolsarGasto, cambiarOrigen, revisarIngreso, eliminarIngreso, pdfInforme, eliminarInforme,
+        reembolsarGasto, cambiarOrigen, revisarIngreso, eliminarIngreso, pdfInforme, editarInforme, eliminarInforme,
         // Para el módulo de órdenes de compra (compras.js)
         gestiona, nombrePerfil, presupuestoDe, subirArchivo, CATEGORIAS,
         agregarGasto: fila => reemplazar(gastos, fila),

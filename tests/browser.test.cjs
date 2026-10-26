@@ -508,6 +508,14 @@ try {
  assert.equal(inf.titulo,'Remates piso 3'); assert.equal(inf.items[0].titulo,'Muro living');
  assert.equal(inf.items[0].antes.length,1); assert.equal(inf.items[0].despues.length,1);
  await pt.getByText('PDF listo').waitFor();
+ // "Editar" desde Proyectos abre gastos.html?informe=<id> directo en el editor.
+ await pt.evaluate(id=>{history.pushState(null,'','/gastos.html?informe='+id);return G.refrescar();},inf.id);
+ assert.equal(await pt.locator('input[placeholder^="Ej: Remates"]').inputValue(),'Remates piso 3');
+ assert.equal(await pt.evaluate(()=>location.search),'','El enlace se limpia para no reabrirse al refrescar');
+ await pt.locator('textarea[placeholder^="Pendientes"]').fill('Falta sellar junta');
+ await pt.locator('#inf-guardar').click();
+ await pt.waitForFunction(()=>window.fixture.tables.proyecto_informes[0].observaciones==='Falta sellar junta');
+ assert.equal(await pt.evaluate(()=>window.fixture.tables.proyecto_informes.length),1);
  assert.deepEqual(pt.errores,[]);
  await pt.close();
  console.log('Navegador: plataforma, ejecución de proyecto (EP, aprobación, atraso, Excel, pago, gastos), app de terreno (gastos, ingresos, informe) y pago con Mercado Pago correctos en escritorio y móvil. Sin errores JS.');

@@ -135,6 +135,22 @@ const G = (() => {
         gastos = ga.data || []; ingresos = ing.data || [];
         informes = (inf.data || []).filter(x => proyectoDe(x.proyecto_id) || x.registrado_por === usuario.id);
         ir(pantalla === 'informe' ? 'informes' : pantalla);
+        // Enlace "Editar" desde Proyectos en el escritorio: gastos.html?informe=<id>
+        const pedido = new URLSearchParams(location.search).get('informe');
+        if (pedido) {
+            history.replaceState(null, '', location.pathname);
+            await abrirPedido(pedido);
+        }
+    }
+    async function abrirPedido(id) {
+        if (!informes.some(x => x.id === id)) {
+            // Puede quedar fuera de los últimos 100 que trae la lista.
+            const { data } = await supa.from('proyecto_informes').select('*').eq('id', id).maybeSingle();
+            if (!data || !(proyectoDe(data.proyecto_id) || data.registrado_por === usuario.id)) return toast('No se encontró el informe', 'error');
+            informes.push(data);
+        }
+        ir('informes');
+        await abrirInforme(id);
     }
     async function refrescar() {
         if (ocupado || !salirDelInforme()) return;
